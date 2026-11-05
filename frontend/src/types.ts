@@ -25,7 +25,8 @@ export interface Category {
 
 export interface Format {
   id: number;
-  category_id: number;
+  category_id: number; // default category
+  category_ids: number[]; // every category the format is used for (default first)
   name: string;
   color: string;
   physical: boolean;

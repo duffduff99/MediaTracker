@@ -151,6 +151,24 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (source, query)
     );
     """,
+    # 3 — a format can be used by several categories (e.g. Blu-ray for Movies and TV); the category
+    #     belongs to the title. formats.category_id stays as the format's default category.
+    #     Adds a TV category, allowed on every format the Movies category uses.
+    """
+    CREATE TABLE format_categories (
+        format_id INTEGER NOT NULL REFERENCES formats(id) ON DELETE CASCADE,
+        category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+        PRIMARY KEY (format_id, category_id)
+    );
+    INSERT INTO format_categories (format_id, category_id) SELECT id, category_id FROM formats;
+    UPDATE categories SET sort_order = sort_order * 10;
+    INSERT INTO categories (name, has_artist, sort_order)
+        SELECT 'TV', 0, 5 WHERE NOT EXISTS (SELECT 1 FROM categories WHERE name = 'TV');
+    INSERT OR IGNORE INTO format_categories (format_id, category_id)
+        SELECT f.id, (SELECT id FROM categories WHERE name = 'TV')
+        FROM formats f JOIN categories c ON c.id = f.category_id
+        WHERE c.name = 'Movies';
+    """,
 ]
 
 

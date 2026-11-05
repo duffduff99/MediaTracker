@@ -401,7 +401,7 @@ function MediaTypes() {
               <tr>
                 <th>Order</th>
                 <th>Format</th>
-                <th>Category</th>
+                <th>Categories</th>
                 <th>Physical</th>
                 <th>
                   <span className="visually-hidden">Actions</span>
@@ -422,7 +422,7 @@ function MediaTypes() {
                   <td>
                     <FormatBadge format={f} />
                   </td>
-                  <td>{categoryById(f.category_id)?.name}</td>
+                  <td>{f.category_ids.map((c) => categoryById(c)?.name).join(", ")}</td>
                   <td>{f.physical ? "Yes" : "No (digital)"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <button className="btn sm" type="button" onClick={() => setEditing(f)}>
@@ -475,12 +475,20 @@ function FormatEditor({ format, onClose }: { format: Format | null; onClose: () 
   const { meta, setMeta } = useApp();
   const [name, setName] = useState(format?.name ?? "");
   const [categoryId, setCategoryId] = useState(format?.category_id ?? meta?.categories[0]?.id ?? 0);
+  const [categoryIds, setCategoryIds] = useState<number[]>(format?.category_ids ?? [categoryId]);
   const [color, setColor] = useState(format?.color ?? "#55504a");
   const [physical, setPhysical] = useState(format?.physical ?? true);
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const body = { name, category_id: categoryId, color, physical, sort_order: format?.sort_order ?? (meta?.formats.length ?? 0) };
+    const body = {
+      name,
+      category_id: categoryId,
+      category_ids: [...new Set([...categoryIds, categoryId])],
+      color,
+      physical,
+      sort_order: format?.sort_order ?? (meta?.formats.length ?? 0),
+    };
     try {
       setMeta(format ? await api.put<Meta>(`/api/formats/${format.id}`, body) : await api.post<Meta>("/api/formats", body));
       onClose();
@@ -496,8 +504,34 @@ function FormatEditor({ format, onClose }: { format: Format | null; onClose: () 
           <input id="fm-name" className="input" value={name} onChange={(e) => setName(e.target.value)} required />
         </div>
         <div className="field">
-          <label htmlFor="fm-cat">Category</label>
-          <select id="fm-cat" className="input" value={categoryId} onChange={(e) => setCategoryId(Number(e.target.value))}>
+          <span className="field-label">Used for</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0 16px" }}>
+            {meta?.categories.map((c) => (
+              <label key={c.id} className="check">
+                <input
+                  type="checkbox"
+                  checked={categoryIds.includes(c.id) || c.id === categoryId}
+                  disabled={c.id === categoryId}
+                  onChange={(e) => setCategoryIds((ids) => (e.target.checked ? [...ids, c.id] : ids.filter((x) => x !== c.id)))}
+                />
+                {c.name}
+              </label>
+            ))}
+          </div>
+          <span className="hint">E.g. Blu-ray for both Movies and TV. When adding an item, you pick the category if there's more than one.</span>
+        </div>
+        <div className="field">
+          <label htmlFor="fm-cat">Default category</label>
+          <select
+            id="fm-cat"
+            className="input"
+            value={categoryId}
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              setCategoryId(id);
+              setCategoryIds((ids) => [...new Set([...ids, id])]);
+            }}
+          >
             {meta?.categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -509,7 +543,7 @@ function FormatEditor({ format, onClose }: { format: Format | null; onClose: () 
           <label htmlFor="fm-color">Label colour</label>
           <div className="row">
             <input id="fm-color" type="color" value={color} onChange={(e) => setColor(e.target.value)} style={{ width: 56, height: 40, border: "none", background: "none" }} />
-            <FormatBadge format={{ id: 0, name: name || "Preview", category_id: categoryId, color, physical, sort_order: 0 }} />
+            <FormatBadge format={{ id: 0, name: name || "Preview", category_id: categoryId, category_ids: categoryIds, color, physical, sort_order: 0 }} />
           </div>
           <span className="hint">Tip: use the colour of the real case (Blu-ray blue, HD DVD red…).</span>
         </div>

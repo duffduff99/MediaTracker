@@ -18,7 +18,7 @@ from ..services import (
     fetch_items,
     filter_items,
     find_or_create_title,
-    format_category,
+    resolve_category,
     get_item,
     load_meta,
 )
@@ -35,19 +35,16 @@ class ItemIn(BaseModel):
     year: int | None = Field(default=None, ge=1800, le=2200)
     artist: str | None = Field(default=None, max_length=300)
     format_id: int
+    category_id: int | None = None  # only needed for a new title when the format has several categories
     barcode: str | None = Field(default=None, max_length=64)
     box_set_id: int | None = None
     notes: str | None = Field(default=None, max_length=5000)
     custom: dict = {}
 
 
-def _resolve_title(conn: sqlite3.Connection, body: ItemIn, category_id: int) -> int:
+def _resolve_title(conn: sqlite3.Connection, body: ItemIn) -> int:
+    category_id = resolve_category(conn, body.format_id, body.title_id, body.category_id)
     if body.title_id:
-        row = conn.execute("SELECT category_id FROM titles WHERE id = ?", (body.title_id,)).fetchone()
-        if row is None:
-            raise HTTPException(400, "Unknown title.")
-        if row["category_id"] != category_id:
-            raise HTTPException(400, "That title belongs to a different category than this format.")
         return body.title_id
     return find_or_create_title(conn, body.title or "", category_id, body.year, body.artist)
 
@@ -87,12 +84,11 @@ def read_item(item_id: int, _=Depends(current_user), conn: sqlite3.Connection = 
 @router.post("/items")
 def create_item(body: ItemIn, user=Depends(require("editor")), conn: sqlite3.Connection = Depends(get_db)):
     meta = load_meta(conn)
-    category_id = format_category(conn, body.format_id)
     _check_box_set(conn, body.box_set_id)
     custom = clean_custom(meta["fields"], body.format_id, body.custom)
     ts = now()
     with tx(conn):
-        title_id = _resolve_title(conn, body, category_id)
+        title_id = _resolve_title(conn, body)
         cur = conn.execute(
             """INSERT INTO items (title_id, format_id, barcode, box_set_id, notes, custom, added_by, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -106,11 +102,10 @@ def create_item(body: ItemIn, user=Depends(require("editor")), conn: sqlite3.Con
 def update_item(item_id: int, body: ItemIn, _=Depends(require("editor")), conn: sqlite3.Connection = Depends(get_db)):
     get_item(conn, item_id)
     meta = load_meta(conn)
-    category_id = format_category(conn, body.format_id)
     _check_box_set(conn, body.box_set_id)
     custom = clean_custom(meta["fields"], body.format_id, body.custom)
     with tx(conn):
-        title_id = _resolve_title(conn, body, category_id)
+        title_id = _resolve_title(conn, body)
         conn.execute(
             """UPDATE items SET title_id = ?, format_id = ?, barcode = ?, box_set_id = ?, notes = ?, custom = ?,
                updated_at = ? WHERE id = ?""",
@@ -216,20 +211,72 @@ class TitleIn(BaseModel):
     name: str = Field(min_length=1, max_length=300)
     year: int | None = Field(default=None, ge=1800, le=2200)
     artist: str | None = Field(default=None, max_length=300)
+    category_id: int | None = None
+
+
+def _blocking_formats(conn: sqlite3.Connection, title_ids: list[int], category_id: int) -> list[str]:
+    """Formats used by these titles' copies that aren't set up for ``category_id``."""
+    if not title_ids:
+        return []
+    marks = ",".join("?" * len(title_ids))
+    rows = conn.execute(
+        f"""SELECT DISTINCT f.name FROM items i JOIN formats f ON f.id = i.format_id
+            WHERE i.title_id IN ({marks})
+              AND f.category_id != ?
+              AND NOT EXISTS (SELECT 1 FROM format_categories fc WHERE fc.format_id = f.id AND fc.category_id = ?)""",
+        (*title_ids, category_id, category_id),
+    ).fetchall()
+    return [r[0] for r in rows]
 
 
 @router.put("/titles/{title_id}")
 def update_title(title_id: int, body: TitleIn, _=Depends(require("editor")), conn: sqlite3.Connection = Depends(get_db)):
-    if not conn.execute("SELECT 1 FROM titles WHERE id = ?", (title_id,)).fetchone():
+    row = conn.execute("SELECT * FROM titles WHERE id = ?", (title_id,)).fetchone()
+    if row is None:
         raise HTTPException(404, "Title not found.")
+    category_id = body.category_id or row["category_id"]
+    if category_id != row["category_id"]:
+        if not conn.execute("SELECT 1 FROM categories WHERE id = ?", (category_id,)).fetchone():
+            raise HTTPException(400, "Unknown category.")
+        blocked = _blocking_formats(conn, [title_id], category_id)
+        if blocked:
+            raise HTTPException(400, f"{', '.join(blocked)} isn't set up for that category (Settings → Media types).")
     name = body.name.strip()
     with tx(conn):
         conn.execute(
-            "UPDATE titles SET name = ?, match_key = ?, year = ?, artist = ?, updated_at = ? WHERE id = ?",
+            "UPDATE titles SET name = ?, match_key = ?, year = ?, artist = ?, category_id = ?, updated_at = ? WHERE id = ?",
             (name, text.match_key(name) or text.search_norm(name), body.year,
-             (body.artist or "").strip() or None, now(), title_id),
+             (body.artist or "").strip() or None, category_id, now(), title_id),
         )
     return _title_detail(conn, title_id)
+
+
+class CategoryMoveIn(BaseModel):
+    item_ids: list[int] = Field(max_length=10000)
+    category_id: int
+
+
+@router.post("/titles/change-category")
+def change_category(body: CategoryMoveIn, _=Depends(require("editor")), conn: sqlite3.Connection = Depends(get_db)):
+    """Move the titles of the selected copies (with all their copies) to another category."""
+    if not conn.execute("SELECT 1 FROM categories WHERE id = ?", (body.category_id,)).fetchone():
+        raise HTTPException(400, "Unknown category.")
+    title_ids = sorted({r[0] for r in conn.execute(
+        f"SELECT title_id FROM items WHERE id IN ({','.join('?' * len(body.item_ids))})", body.item_ids
+    )}) if body.item_ids else []
+    moved, skipped = 0, []
+    with tx(conn):
+        for tid in title_ids:
+            t = conn.execute("SELECT name, category_id FROM titles WHERE id = ?", (tid,)).fetchone()
+            if t["category_id"] == body.category_id:
+                continue
+            blocked = _blocking_formats(conn, [tid], body.category_id)
+            if blocked:
+                skipped.append(f"{t['name']} ({', '.join(blocked)} isn't set up for that category)")
+                continue
+            conn.execute("UPDATE titles SET category_id = ?, updated_at = ? WHERE id = ?", (body.category_id, now(), tid))
+            moved += 1
+    return {"moved": moved, "skipped": skipped}
 
 
 class MergeIn(BaseModel):

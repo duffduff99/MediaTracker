@@ -28,6 +28,7 @@ export function ItemForm() {
     }
   });
   const [titleText, setTitleText] = useState(params.get("title") ?? "");
+  const [chosenCategory, setChosenCategory] = useState<number | null>(Number(params.get("category_id")) || null);
   const [linked, setLinked] = useState<TitleHit | null>(null);
   const [suggestions, setSuggestions] = useState<TitleHit[]>([]);
   const [showSuggest, setShowSuggest] = useState(false);
@@ -79,8 +80,8 @@ export function ItemForm() {
         .then((t) => {
           setLinked({ id: t.id, name: t.name, year: t.year, artist: t.artist, category_id: t.category_id, formats: [] });
           setTitleText(t.name);
-          const fmt = meta?.formats.find((f) => f.category_id === t.category_id && !t.items.some((i) => i.format_id === f.id));
-          if (fmt && formatById(formatId)?.category_id !== t.category_id) setFormatId(fmt.id);
+          const fmt = meta?.formats.find((f) => f.category_ids.includes(t.category_id) && !t.items.some((i) => i.format_id === f.id));
+          if (fmt && !formatById(formatId)?.category_ids.includes(t.category_id)) setFormatId(fmt.id);
         })
         .catch(() => {});
     }
@@ -88,16 +89,24 @@ export function ItemForm() {
   }, [id]);
 
   const format = formatById(formatId);
-  const category = categoryById(format?.category_id ?? 0);
+  // A format can serve several categories (Blu-ray: Movies or TV). A linked title decides it;
+  // otherwise the person's choice, else the format's default.
+  const categoryChoices = format?.category_ids ?? [];
+  const categoryId = linked
+    ? linked.category_id
+    : chosenCategory && categoryChoices.includes(chosenCategory)
+      ? chosenCategory
+      : (format?.category_id ?? 0);
+  const category = categoryById(categoryId);
 
-  const runLookup = async (code: string, fmtId: number, refresh = false) => {
+  const runLookup = async (code: string, fmtId: number, catId: number, refresh = false) => {
     if (!meta?.lookups_enabled || code.replace(/\D/g, "").length < 6 || !fmtId) return;
     setLookingUp(true);
     setLookupError(null);
     setLookupResult(null);
-    lookupCategory.current = formatById(fmtId)?.category_id ?? null;
+    lookupCategory.current = catId;
     try {
-      setLookupResult(await api.get<LookupResult>(`/api/lookup${qs({ barcode: code, format_id: fmtId, refresh })}`));
+      setLookupResult(await api.get<LookupResult>(`/api/lookup${qs({ barcode: code, format_id: fmtId, category_id: catId, refresh })}`));
     } catch (e) {
       setLookupError((e as Error).message);
     } finally {
@@ -109,17 +118,17 @@ export function ItemForm() {
   useEffect(() => {
     if (editing || autoLookupDone.current || !meta || !format || !params.get("barcode")) return;
     autoLookupDone.current = true;
-    runLookup(params.get("barcode") ?? "", format.id);
+    runLookup(params.get("barcode") ?? "", format.id, categoryId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta, format]);
 
-  // Switching to a format in another category (e.g. Blu-ray → CD) uses different sources: look up again.
+  // Switching category (e.g. Blu-ray → CD, or Movies → TV) uses different sources: look up again.
   useEffect(() => {
-    if (lookupResult && format && lookupCategory.current !== null && format.category_id !== lookupCategory.current) {
-      runLookup(barcode, format.id);
+    if (lookupResult && format && lookupCategory.current !== null && categoryId !== lookupCategory.current) {
+      runLookup(barcode, format.id, categoryId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [format?.category_id]);
+  }, [categoryId]);
 
   const mergeCustom = (c: LookupCandidate) => {
     const allowed = new Set(format ? fieldsFor([format.id]).map((f) => f.key) : []);
@@ -148,9 +157,9 @@ export function ItemForm() {
     toast(`Linked to your existing “${t.name}”`);
   };
 
-  // unlink a title from another category if the format changes category
+  // unlink the title if the new format isn't used for its category
   useEffect(() => {
-    if (linked && format && linked.category_id !== format.category_id) setLinked(null);
+    if (linked && format && !format.category_ids.includes(linked.category_id)) setLinked(null);
   }, [format, linked]);
 
   // title suggestions
@@ -161,12 +170,12 @@ export function ItemForm() {
     }
     const t = window.setTimeout(() => {
       api
-        .get<TitleHit[]>(`/api/titles${qs({ q: titleText, category_id: format.category_id, limit: 8 })}`)
+        .get<TitleHit[]>(`/api/titles${qs({ q: titleText, category_id: categoryId, limit: 8 })}`)
         .then(setSuggestions)
         .catch(() => {});
     }, 200);
     return () => window.clearTimeout(t);
-  }, [titleText, linked, format]);
+  }, [titleText, linked, format, categoryId]);
 
   // warn if this barcode is already in the collection
   useEffect(() => {
@@ -197,6 +206,7 @@ export function ItemForm() {
       year: linked ? null : year ? Number(year) : null,
       artist: linked ? null : artist.trim() || null,
       format_id: format.id,
+      category_id: linked ? null : categoryId,
       barcode: barcode.trim() || null,
       box_set_id: boxSetId,
       notes: notes.trim() || null,
@@ -270,7 +280,7 @@ export function ItemForm() {
           <div className="field">
             <label htmlFor="format">Format</label>
             <select id="format" className="input" value={formatId || ""} onChange={(e) => setFormatId(Number(e.target.value))}>
-              {meta?.categories.map((c) => (
+              {meta?.categories.filter((c) => meta.formats.some((f) => f.category_id === c.id)).map((c) => (
                 <optgroup key={c.id} label={c.name}>
                   {meta.formats
                     .filter((f) => f.category_id === c.id)
@@ -284,12 +294,27 @@ export function ItemForm() {
             </select>
           </div>
 
+          {!linked && categoryChoices.length > 1 && (
+            <div className="field">
+              <label htmlFor="category">Category</label>
+              <select id="category" className="input" value={categoryId} onChange={(e) => setChosenCategory(Number(e.target.value))}>
+                {categoryChoices.map((cid) => (
+                  <option key={cid} value={cid}>
+                    {categoryById(cid)?.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="field span-2">
             <label htmlFor="title">{category?.has_artist ? "Album title" : "Title"}</label>
             {linked ? (
               <div className="linked">
                 <strong>{linked.name}</strong>
-                <span className="muted">{[linked.year, linked.artist].filter(Boolean).join(" · ")}</span>
+                <span className="muted">
+                  {[linked.year, linked.artist, categoryChoices.length > 1 ? categoryById(linked.category_id)?.name : null].filter(Boolean).join(" · ")}
+                </span>
                 {linked.formats.length > 0 && <span className="small muted">You own: {linked.formats.join(", ")}</span>}
                 <div className="spacer" />
                 <button
@@ -368,7 +393,7 @@ export function ItemForm() {
                     type="button"
                     className="btn sm"
                     disabled={lookingUp || barcode.replace(/\D/g, "").length < 6}
-                    onClick={() => format && runLookup(barcode, format.id)}
+                    onClick={() => format && runLookup(barcode, format.id, categoryId)}
                     title="Fill in details from online databases"
                   >
                     Look up
@@ -407,7 +432,7 @@ export function ItemForm() {
             setLookupResult(null);
             setLookupError(null);
           }}
-          onRetry={() => format && runLookup(barcode, format.id, true)}
+          onRetry={() => format && runLookup(barcode, format.id, categoryId, true)}
         />
 
         {dupes.length > 0 && (
@@ -473,7 +498,7 @@ export function ItemForm() {
           onDetected={(code) => {
             setScanning(false);
             setBarcode(code);
-            if (format) runLookup(code, format.id);
+            if (format) runLookup(code, format.id, categoryId);
           }}
         />
       )}

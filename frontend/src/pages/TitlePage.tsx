@@ -164,14 +164,22 @@ export function TitlePage() {
 }
 
 function EditTitle({ title, hasArtist, onClose, onSaved }: { title: TitleDetail; hasArtist: boolean; onClose: () => void; onSaved: (t: TitleDetail) => void }) {
+  const { meta, formatById } = useApp();
   const [name, setName] = useState(title.name);
+  const [categoryId, setCategoryId] = useState(title.category_id);
+  // categories every copy's format can be used for
+  const allowed = (meta?.categories ?? []).filter((c) =>
+    title.items.every((i) => formatById(i.format_id)?.category_ids.includes(c.id))
+  );
   const [year, setYear] = useState(title.year ? String(title.year) : "");
   const [artist, setArtist] = useState(title.artist ?? "");
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      onSaved(await api.put<TitleDetail>(`/api/titles/${title.id}`, { name, year: year ? Number(year) : null, artist: artist || null }));
+      onSaved(
+        await api.put<TitleDetail>(`/api/titles/${title.id}`, { name, year: year ? Number(year) : null, artist: artist || null, category_id: categoryId })
+      );
     } catch (err) {
       setError((err as Error).message);
     }
@@ -188,6 +196,18 @@ function EditTitle({ title, hasArtist, onClose, onSaved }: { title: TitleDetail;
           <div className="field">
             <label htmlFor="t-artist">Artist</label>
             <input id="t-artist" className="input" value={artist} onChange={(e) => setArtist(e.target.value)} />
+          </div>
+        )}
+        {allowed.length > 1 && (
+          <div className="field">
+            <label htmlFor="t-cat">Category</label>
+            <select id="t-cat" className="input" value={categoryId} onChange={(e) => setCategoryId(Number(e.target.value))}>
+              {allowed.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
         )}
         <div className="field">

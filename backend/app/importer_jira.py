@@ -227,7 +227,8 @@ def _do_import(conn: sqlite3.Connection, cols: _Rows, rows: list[list[str]], rep
                 "INSERT INTO formats (category_id, name, color, physical, sort_order) VALUES (?, ?, '#55504A', 1, 99)",
                 (cat["id"], name),
             )
-            f = {"id": cur.lastrowid, "name": name, "category_id": cat["id"], "physical": True}
+            conn.execute("INSERT INTO format_categories (format_id, category_id) VALUES (?, ?)", (cur.lastrowid, cat["id"]))
+            f = {"id": cur.lastrowid, "name": name, "category_id": cat["id"], "category_ids": [cat["id"]], "physical": True}
             formats[name.lower()] = f
             report.add("formats_created", name)
         return f
@@ -363,11 +364,18 @@ def _do_import(conn: sqlite3.Connection, cols: _Rows, rows: list[list[str]], rep
         if status:
             report.counts[f"status_ignored:{status}"] += 1
 
+        # Items labelled "TV" in Jira go to the TV category when the format is set up for it.
+        category_id = fmt["category_id"]
+        tv = categories.get("tv")
+        if tv and any(lab.lower() == "tv" for lab in labels) and tv["id"] in fmt.get("category_ids", []):
+            category_id = tv["id"]
+            report.add("tv_category", f"{title} [{fmt['name']}]")
+
         records.append({
             "key": key,
             "title": title,
             "match_key": text.match_key(title) or text.search_norm(title),
-            "category_id": fmt["category_id"],
+            "category_id": category_id,
             "format_id": fmt["id"],
             "format": fmt["name"],
             "year": parse_year(cols.one(row, "Custom field (Year)")),

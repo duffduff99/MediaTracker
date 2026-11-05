@@ -214,6 +214,7 @@ function Grid({
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [picking, setPicking] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [reload, setReload] = useState(0);
   const hidden = new Set(user?.prefs.hidden_columns ?? DEFAULT_HIDDEN);
   const fmtKey = formatIds.join(",");
@@ -239,12 +240,14 @@ function Grid({
   // Which formats are "in view" decides which custom columns make sense.
   const relevantFormatIds = useMemo(() => {
     if (formatIds.length) return formatIds;
-    if (categoryId) return (meta?.formats ?? []).filter((f) => f.category_id === categoryId).map((f) => f.id);
+    if (categoryId) return (meta?.formats ?? []).filter((f) => f.category_ids.includes(categoryId)).map((f) => f.id);
     return [...new Set((items ?? []).map((i) => i.format_id))];
   }, [fmtKey, categoryId, items, meta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const columns: Column[] = useMemo(() => {
-    const showArtist = relevantFormatIds.some((id) => categoryById(formatById(id)?.category_id ?? 0)?.has_artist);
+    const showArtist = categoryId
+      ? !!categoryById(categoryId)?.has_artist
+      : relevantFormatIds.some((id) => (formatById(id)?.category_ids ?? []).some((c) => categoryById(c)?.has_artist));
     const cols: Column[] = [
       { key: "title", label: "Title", value: (i) => i.sort_title, render: (i) => <Link to={`/titles/${i.title_id}`}>{i.title}</Link> },
     ];
@@ -350,7 +353,7 @@ function Grid({
         </div>
         <div className="chips" role="group" aria-label="Formats">
           {meta?.formats
-            .filter((f) => !categoryId || f.category_id === categoryId)
+            .filter((f) => !categoryId || f.category_ids.includes(categoryId))
             .map((f) => (
               <button key={f.id} type="button" className="chip" aria-pressed={formatIds.includes(f.id)} onClick={() => toggleFormat(f.id)}>
                 {f.name}
@@ -372,9 +375,14 @@ function Grid({
           </span>
           <div className="spacer" />
           {can("editor") && selected.size > 0 && (
-            <button type="button" className="btn sm danger" onClick={bulkDelete}>
-              Delete {selected.size} selected
-            </button>
+            <>
+              <button type="button" className="btn sm" onClick={() => setMoving(true)}>
+                Change category…
+              </button>
+              <button type="button" className="btn sm danger" onClick={bulkDelete}>
+                Delete {selected.size} selected
+              </button>
+            </>
           )}
         </div>
         <div className="table-wrap">
@@ -459,6 +467,18 @@ function Grid({
         )}
       </div>
 
+      {moving && (
+        <ChangeCategory
+          itemIds={[...selected]}
+          onClose={() => setMoving(false)}
+          onDone={(msg) => {
+            setMoving(false);
+            toast(msg);
+            setReload((n) => n + 1);
+          }}
+        />
+      )}
+
       {picking && (
         <Modal title="Show columns" onClose={() => setPicking(false)}>
           <p className="hint">Only columns that apply to the formats in view are listed. Your choice is saved to your account.</p>
@@ -489,5 +509,58 @@ function Grid({
         </Modal>
       )}
     </>
+  );
+}
+
+function ChangeCategory({ itemIds, onClose, onDone }: { itemIds: number[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const { meta } = useApp();
+  const [categoryId, setCategoryId] = useState<number>(meta?.categories[0]?.id ?? 0);
+  const [skipped, setSkipped] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const move = async () => {
+    try {
+      const r = await api.post<{ moved: number; skipped: string[] }>("/api/titles/change-category", { item_ids: itemIds, category_id: categoryId });
+      if (r.skipped.length) setSkipped(r.skipped);
+      else onDone(`Moved ${r.moved} title(s)`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <Modal title="Change category" onClose={onClose}>
+      {skipped ? (
+        <>
+          <p>Some titles couldn't move because their format isn't set up for that category (Settings → Media types):</p>
+          <ul className="report-list">
+            {skipped.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+          <button className="btn primary" type="button" onClick={() => onDone("Category changed")}>
+            OK
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="hint">
+            Moves the titles of the {itemIds.length} selected item(s), with all their copies, e.g. TV seasons that came in as Movies.
+          </p>
+          <div className="field">
+            <label htmlFor="move-cat">New category</label>
+            <select id="move-cat" className="input" value={categoryId} onChange={(e) => setCategoryId(Number(e.target.value))}>
+              {meta?.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ErrorText error={error} />
+          <button className="btn primary" type="button" onClick={move}>
+            Move
+          </button>
+        </>
+      )}
+    </Modal>
   );
 }
