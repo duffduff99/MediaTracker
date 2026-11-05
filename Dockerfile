@@ -1,5 +1,5 @@
 # ---- 1. build the web front end ------------------------------------------------
-FROM node:24-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
