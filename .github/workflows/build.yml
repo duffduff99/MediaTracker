@@ -24,7 +24,7 @@ jobs:
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
           pytest -q
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
       - name: Front end type-check and build
