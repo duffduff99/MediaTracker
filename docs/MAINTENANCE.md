@@ -10,29 +10,45 @@ This guide assumes you never change the app's features. It covers what you do ne
 
 | Piece | Where |
 |---|---|
-| The app | One container, `ghcr.io/duffduff99/mediatracker`, listening on port **8080** |
-| Your data | One file, `data/mediatracker.db`, in the folder mounted at `/data` |
-| Nightly backups | `data/backups/mediatracker-YYYY-MM-DD.db` (the last 14 are kept) |
+| The app | One container, `ghcr.io/duffduff99/mediatracker`. It listens on port **8080**, published on the host as 8080 unless you set `MT_PORT` |
+| Your data | One file, `mediatracker.db`, in the container's `/data`. By default `/data` is a Docker volume named `mediatracker_mediatracker-data` |
+| Nightly backups | `/data/backups/mediatracker-YYYY-MM-DD.db` (the last 14 are kept) |
 
-There is no separate database server, cache or queue. If the container and the `data` folder are fine, the app is fine.
+There is no separate database server, cache or queue. If the container and its `/data` volume are fine, the app is fine.
 
 ## 2. First install
 
-### 2.1 Start the container
+### 2.1 Deploy from Git in Dockhand
 
-In Dockhand (or any Docker host), create a stack from [`docker-compose.yml`](../docker-compose.yml). Adjust these lines if needed:
+The repository's [`docker-compose.yml`](../docker-compose.yml) pulls the ready-made image that GitHub builds on every merge to `main`. The image is public, so no registry login is needed. Your server doesn't build anything; Dockhand only reads the compose file from Git.
 
-- `ports`: change the left-hand `8080` if that port is taken on the host.
-- `volumes`: `./data:/data` keeps the data next to the compose file. Use an absolute path (for example `/srv/mediatracker/data:/data`) if you prefer. **This folder is what you back up.**
-- `TZ`: your time zone, so backup file names use your local date.
+1. In Dockhand, create a new stack from a **Git repository**:
+   - Repository: `https://github.com/duffduff99/MediaTracker.git` (public, so no credentials)
+   - Branch: `main`
+   - Compose file path: `docker-compose.yml`. Dockhand's default is `compose.yaml`, so change it.
+   - Stack name: `mediatracker`
+2. Add **stack variables** (all optional):
 
-Then deploy it, or run `docker compose up -d`.
+   | Variable | Example | Default |
+   |---|---|---|
+   | `TZ` | `America/Chicago` | `UTC` |
+   | `MT_PORT` | `8080` | `8080`. The host port your reverse proxy points at |
+   | `MT_DATA` | `/srv/mediatracker/data` | a Docker volume (see below) |
+   | `MT_ADMIN_PASSWORD` | | a random one printed in the log |
 
-**If the GitHub repository is private**, the image in GitHub's registry is private too, so the server needs permission to pull it. Either:
-- make the package public (it contains only the app, never your data): on GitHub, go to your profile → **Packages** → `mediatracker` → **Package settings** → **Change visibility**; or
-- give Dockhand/Docker a registry login for `ghcr.io`, with your GitHub username and a [personal access token](https://github.com/settings/tokens) that has only the `read:packages` scope.
+3. Deploy.
 
-Alternatively, build the image on the server from a git checkout: in the compose file, replace `image:` with `build: .`.
+**Where the data lives (`MT_DATA`).** Leave it unset to use a Docker volume. Docker sets the right permissions, and the volume lives with your other Docker data in `/var/lib/docker/volumes/`, so your existing Docker backup covers it. If you'd rather have a plain folder, set `MT_DATA` to an **absolute** path and create it first, owned by uid 1000. The app deliberately doesn't run as root, so it can't fix a root-owned folder itself:
+
+```bash
+sudo mkdir -p /srv/mediatracker/data && sudo chown 1000:1000 /srv/mediatracker/data
+```
+
+Don't use a relative path like `./data` in a Git stack: it would sit inside Dockhand's copy of the repository, which a re-sync can replace.
+
+**Updates.** The compose file sets `pull_policy: always`, so every redeploy pulls the newest image. You can also turn on Dockhand's auto-sync or a GitHub webhook to redeploy whenever `main` changes. That's safe: the data is in the volume, not the container.
+
+**Without Dockhand:** `docker compose up -d` in a checkout of the repo works the same way, and `MT_*` variables can go in a `.env` file next to it. To build the image on the server instead of pulling it, replace `image:` with `build: .`.
 
 ### 2.2 Get the admin password
 
@@ -86,7 +102,7 @@ See [IMPORT.md](IMPORT.md). In short: **Settings → Import & export → Import 
 
 Updates contain security fixes for Python, the base image and the libraries the app uses, even when nothing visible changes.
 
-1. In Dockhand, open the MediaTracker stack and **pull** the latest image, then **redeploy/recreate** the container. From a shell:
+1. In Dockhand, **redeploy** the MediaTracker stack. `pull_policy: always` fetches the newest image. If auto-sync or a webhook is on, this happens by itself when `main` changes. From a shell:
    ```bash
    docker compose pull
    docker compose up -d
@@ -99,11 +115,11 @@ New images appear when code is merged to `main` on GitHub. Dependabot opens mont
 
 ### Every few months: check backups
 
-1. Look in `data/backups/`. You should see one file per night, up to 14.
-2. Make sure your existing Docker-volume backup includes the `data` folder, and that copies leave the server (to a NAS or offsite).
+1. Look in `/data/backups/`, using Dockhand's volume browser or `docker exec mediatracker ls -l /data/backups`. You should see one file per night, up to 14.
+2. Make sure your existing Docker backup includes the volume (or your `MT_DATA` folder), and that copies leave the server (to a NAS or offsite).
 3. Once in a while, do a test restore (§5) into a scratch container. A backup you've never restored is a guess.
 
-**Why the nightly copies matter:** copying `mediatracker.db` while the app is writing can produce a damaged copy. The files in `data/backups/` are made with SQLite's own backup function, so they are always consistent. Your volume backup will pick them up.
+**Why the nightly copies matter:** copying `mediatracker.db` while the app is writing can produce a damaged copy. The files in `/data/backups/` are made with SQLite's own backup function, so they are always consistent. Your volume backup will pick them up.
 
 You can also download a backup at any time: **Settings → Import & export → Download backup**.
 
@@ -114,9 +130,13 @@ You can also download a backup at any time: **Settings → Import & export → D
 
 ## 4. Settings you can change (environment variables)
 
+Set these as Dockhand stack variables, or in a `.env` file next to the compose file.
+
 | Variable | Default | What it does |
 |---|---|---|
-| `TZ` | UTC | Time zone, used for backup file names |
+| `MT_PORT` | `8080` | Host port the app is published on |
+| `MT_DATA` | Docker volume `mediatracker-data` | Where `/data` lives. A volume name, or an absolute host path owned by uid 1000 |
+| `TZ` | `UTC` | Time zone, used for backup file names |
 | `MT_ADMIN_PASSWORD` | random, printed in the log | Password for the first admin. Only used when there are no users yet |
 | `MT_ADMIN_USERNAME` | `admin` | Username for that first admin |
 | `MT_BACKUP_KEEP` | `14` | Number of nightly backups to keep |
@@ -124,16 +144,19 @@ You can also download a backup at any time: **Settings → Import & export → D
 | `MT_SESSION_DAYS` | `30` | How long a sign-in lasts |
 | `MT_FORWARDED_ALLOW_IPS` | `*` | Which proxy IPs the app trusts for forwarded headers. Set it to your proxy's IP to be strict |
 
+The last five aren't listed in the compose file. To use one, add it under `environment:` as `MT_BACKUP_KEEP: "${MT_BACKUP_KEEP:-14}"`.
+
 ## 5. Restore and roll back
 
-**Restore a backup:**
+**Restore a backup.** Stop the stack in Dockhand (or run `docker stop mediatracker`), then copy the backup over the live file. Running the copy as uid 1000 keeps the file's owner correct:
 
 ```bash
-docker compose stop
-cp data/backups/mediatracker-2026-11-05.db data/mediatracker.db
-rm -f data/mediatracker.db-wal data/mediatracker.db-shm
-docker compose start
+docker run --rm --user 1000 -v mediatracker_mediatracker-data:/data --entrypoint sh \
+  ghcr.io/duffduff99/mediatracker:latest -c \
+  'cp /data/backups/mediatracker-2026-11-05.db /data/mediatracker.db && rm -f /data/mediatracker.db-wal /data/mediatracker.db-shm'
 ```
+
+Then start the stack again. If you use an `MT_DATA` folder, put that path in place of `mediatracker_mediatracker-data`. If you named the stack something other than `mediatracker`, run `docker volume ls` to find the volume name.
 
 **Roll back to an older version of the app:** every image is also tagged `sha-<commit>` (see the repository's **Packages** page). Put that tag in the compose file instead of `latest`, then restore the backup taken before the update. Older versions don't know about newer database changes.
 
@@ -148,7 +171,8 @@ docker compose start
 | "Install app" isn't offered on Android | Usually means no HTTPS, or a certificate the phone doesn't trust |
 | Phone can't reach it away from home | WireGuard isn't connected, or the tunnel doesn't route/resolve your internal hostname |
 | Jira import fails with "413" or "too large" | Your reverse proxy's upload limit. See §2.3 |
-| Container keeps restarting | Check the logs. The most common cause is a `data` folder that the container user (uid 1000) can't write to. Fix with `sudo chown -R 1000:1000 data` |
+| Container keeps restarting | Check the logs. The most common cause is an `MT_DATA` folder that uid 1000 can't write to. Fix with `sudo chown -R 1000:1000 /your/data/folder` |
+| Dockhand can't find the compose file | Set the compose file path to `docker-compose.yml` (Dockhand defaults to `compose.yaml`) |
 | Looks wrong after an update | Hard-refresh the browser (on a phone, close and reopen the app). The app caches its own files for speed |
 
 ## 7. If you ever want to make changes

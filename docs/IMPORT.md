@@ -15,7 +15,7 @@ docker exec mediatracker python -m app.importer_jira /data/Jira.csv            #
 docker exec mediatracker python -m app.importer_jira /data/Jira.csv --commit   # import
 ```
 
-(Copy the CSV into the `data` folder first.)
+Copy the CSV into the container first with `docker cp Jira.csv mediatracker:/data/Jira.csv`.
 
 ## What it does with your data
 
