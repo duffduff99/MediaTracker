@@ -65,6 +65,7 @@ ROWS = [
     row("The Heat", "MEDIA-23", "Blu-Ray", barcode="02454386624480", year="2013.0"),
     row("Back To the Future", "MEDIA-24", "Blu-Ray", barcode="191329144671", year="1985.0"),
     row("Back to the Future Part II", "MEDIA-25", "Blu-Ray", barcode="191329144671", year="1989.0"),
+    row("Walking Dead, The - Season 8", "MEDIA-26", "Blu-Ray", year="2017.0", labels=["TV"]),
 ]
 
 
@@ -116,14 +117,15 @@ def test_dry_run_changes_nothing(client):
     assert r.status_code == 200, r.text
     report = r.json()
     assert report["committed"] is False
-    assert report["counts"]["items_created"] == 15
+    assert report["counts"]["items_created"] == 16
     assert client.get("/api/items").json() == []
 
 
 def test_import(client, meta):
     report = _upload(client, True).json()
     c = report["counts"]
-    assert c["items_created"] == 15
+    assert c["items_created"] == 16
+    assert c["tv_category"] == 1
     assert c["box_sets_created"] == 1
     assert c["barcodes_need_rescan"] == 1
     assert c["barcodes_leading_zero_restored"] == 2
@@ -173,7 +175,12 @@ def test_import(client, meta):
     assert halo["custom"] == {"max_players": 4} and halo["added_by"] == "Collin Duffy"
     assert halo["format_id"] == fmt_id(meta, "Xbox")
 
+    # Jira's "TV" label puts the item in the TV category (and keeps the tag)
+    wd = by_key["jira:MEDIA-26"]
+    assert wd["title"] == "The Walking Dead - Season 8" and wd["custom"]["tags"] == ["TV"]
+    assert wd["category_id"] == next(c["id"] for c in meta["categories"] if c["name"] == "TV")
+
     # Re-running skips everything already imported
     again = _upload(client, True).json()
     assert again["counts"].get("items_created", 0) == 0
-    assert again["counts"]["skipped_already_imported"] == 15
+    assert again["counts"]["skipped_already_imported"] == 16

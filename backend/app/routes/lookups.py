@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api")
 def barcode_lookup(
     barcode: str,
     format_id: int,
+    category_id: int | None = None,
     refresh: bool = False,
     _=Depends(require("editor")),
     conn: sqlite3.Connection = Depends(get_db),
@@ -27,7 +28,7 @@ def barcode_lookup(
     if not lookup.lookups_enabled(conn):
         raise HTTPException(409, "Barcode lookups are turned off (Settings → Barcode lookup).")
     try:
-        return lookup.lookup(conn, load_meta(conn), barcode, format_id, refresh=refresh)
+        return lookup.lookup(conn, load_meta(conn), barcode, format_id, refresh=refresh, category_id=category_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

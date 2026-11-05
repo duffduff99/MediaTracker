@@ -65,7 +65,7 @@ def update_category(cat_id: int, body: CategoryIn, _=Depends(require("admin")), 
 @router.delete("/categories/{cat_id}")
 def delete_category(cat_id: int, _=Depends(require("admin")), conn: sqlite3.Connection = Depends(get_db)):
     if conn.execute("SELECT 1 FROM formats WHERE category_id = ?", (cat_id,)).fetchone():
-        raise HTTPException(409, "Move or delete this category's formats first.")
+        raise HTTPException(409, "Some formats use this as their default category. Change their default first.")
     if conn.execute("SELECT 1 FROM titles WHERE category_id = ?", (cat_id,)).fetchone():
         raise HTTPException(409, "This category still has titles.")
     with tx(conn):
@@ -78,10 +78,30 @@ def delete_category(cat_id: int, _=Depends(require("admin")), conn: sqlite3.Conn
 
 class FormatIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
-    category_id: int
+    category_id: int  # the default category
+    category_ids: list[int] = []  # every category the format can be used for (the default is always included)
     color: str = Field(default="#55504A", pattern=COLOR)
     physical: bool = True
     sort_order: int = 0
+
+
+def _set_format_categories(conn: sqlite3.Connection, format_id: int, body: FormatIn) -> None:
+    wanted = set(body.category_ids) | {body.category_id}
+    valid = {r[0] for r in conn.execute("SELECT id FROM categories")}
+    if not wanted <= valid:
+        raise HTTPException(400, "Unknown category.")
+    current = {r[0] for r in conn.execute("SELECT category_id FROM format_categories WHERE format_id = ?", (format_id,))}
+    for cat in current - wanted:
+        used = conn.execute(
+            "SELECT COUNT(*) FROM items i JOIN titles t ON t.id = i.title_id WHERE i.format_id = ? AND t.category_id = ?",
+            (format_id, cat),
+        ).fetchone()[0]
+        if used:
+            name = conn.execute("SELECT name FROM categories WHERE id = ?", (cat,)).fetchone()[0]
+            raise HTTPException(409, f"{used} {name} item(s) use this format, so {name} can't be removed from it.")
+    conn.execute("DELETE FROM format_categories WHERE format_id = ?", (format_id,))
+    for cat in wanted:
+        conn.execute("INSERT INTO format_categories (format_id, category_id) VALUES (?, ?)", (format_id, cat))
 
 
 @router.post("/formats")
@@ -91,10 +111,11 @@ def create_format(body: FormatIn, _=Depends(require("admin")), conn: sqlite3.Con
     if not conn.execute("SELECT 1 FROM categories WHERE id = ?", (body.category_id,)).fetchone():
         raise HTTPException(400, "Unknown category.")
     with tx(conn):
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO formats (category_id, name, color, physical, sort_order) VALUES (?, ?, ?, ?, ?)",
             (body.category_id, body.name.strip(), body.color, int(body.physical), body.sort_order),
         )
+        _set_format_categories(conn, cur.lastrowid, body)
     return load_meta(conn)
 
 
@@ -105,15 +126,16 @@ def update_format(format_id: int, body: FormatIn, _=Depends(require("admin")), c
         raise HTTPException(404, "Format not found.")
     if conn.execute("SELECT 1 FROM formats WHERE name = ? AND id != ?", (body.name.strip(), format_id)).fetchone():
         raise HTTPException(409, "A format with that name exists.")
-    if body.category_id != row["category_id"] and conn.execute(
-        "SELECT 1 FROM items WHERE format_id = ?", (format_id,)
-    ).fetchone():
-        raise HTTPException(409, "Can't change the category of a format that has items.")
     with tx(conn):
         conn.execute(
             "UPDATE formats SET name = ?, category_id = ?, color = ?, physical = ?, sort_order = ? WHERE id = ?",
             (body.name.strip(), body.category_id, body.color, int(body.physical), body.sort_order, format_id),
         )
+        if body.category_ids or body.category_id != row["category_id"]:
+            if not body.category_ids:  # an older client sent only the default: keep the other categories
+                body.category_ids = [r[0] for r in conn.execute(
+                    "SELECT category_id FROM format_categories WHERE format_id = ?", (format_id,))]
+            _set_format_categories(conn, format_id, body)
     return load_meta(conn)
 
 

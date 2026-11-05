@@ -58,10 +58,24 @@ def nightly(settings: Settings) -> None:
         conn.close()
 
 
+def plex_hourly(settings: Settings) -> None:
+    from . import plex  # imported here to keep start-up light
+
+    conn = connect(settings.db_path)
+    try:
+        plex.scheduled_sync(conn)
+    finally:
+        conn.close()
+
+
 async def loop(settings: Settings) -> None:
     while True:
         try:
             await asyncio.to_thread(nightly, settings)
         except Exception:  # keep the loop alive; the error is logged
             log.exception("Maintenance job failed")
+        try:
+            await asyncio.to_thread(plex_hourly, settings)
+        except Exception:
+            log.exception("Plex sync failed")
         await asyncio.sleep(3600)

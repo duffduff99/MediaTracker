@@ -425,7 +425,7 @@ def upcitemdb(conn: sqlite3.Connection, barcode: str, key: str | None, refresh: 
     return _cached(conn, "upcitemdb", text.digits_only(barcode), refresh, fetch)
 
 
-def tmdb(conn: sqlite3.Connection, title: str, key: str, refresh: bool) -> tuple[list[dict], bool]:
+def tmdb(conn: sqlite3.Connection, title: str, key: str, refresh: bool, tv_first: bool = False) -> tuple[list[dict], bool]:
     if key.startswith("eyJ"):  # v4 "API Read Access Token" (a JWT)
         headers: dict[str, str] | None = {"Authorization": f"Bearer {key}"}
         auth: dict[str, str] = {}
@@ -434,7 +434,8 @@ def tmdb(conn: sqlite3.Connection, title: str, key: str, refresh: bool) -> tuple
 
     def fetch() -> list[dict]:
         out = []
-        for kind, name_key, date_key in (("movie", "title", "release_date"), ("tv", "name", "first_air_date")):
+        kinds = [("movie", "title", "release_date"), ("tv", "name", "first_air_date")]
+        for kind, name_key, date_key in (kinds[::-1] if tv_first else kinds):
             url = f"https://api.themoviedb.org/3/search/{kind}?" + urllib.parse.urlencode(
                 {"query": title, "include_adult": "false", "language": "en-US", "page": 1, **auth}
             )
@@ -449,10 +450,10 @@ def tmdb(conn: sqlite3.Connection, title: str, key: str, refresh: bool) -> tuple
                     "url": f"https://www.themoviedb.org/{kind}/{r.get('id')}" if r.get("id") else None,
                 })
             if any(text.match_key(o["title"]) == text.match_key(title) for o in out):
-                break  # good movie match; skip the TV search
+                break  # good match; skip the other search
         return out
 
-    return _cached(conn, "tmdb", text.search_norm(title), refresh, fetch)
+    return _cached(conn, "tmdb-tv" if tv_first else "tmdb", text.search_norm(title), refresh, fetch)
 
 
 def check_credentials(source: str, key: str) -> tuple[bool, str]:
@@ -497,12 +498,15 @@ def _music_rank(kind: str | None, media: str | None) -> int:
     return 1 if any(w in m for w in want) else 0
 
 
-def lookup(conn: sqlite3.Connection, meta: dict, barcode: str, format_id: int, refresh: bool = False) -> dict:
+def lookup(conn: sqlite3.Connection, meta: dict, barcode: str, format_id: int, refresh: bool = False,
+           category_id: int | None = None) -> dict:
     code = text.digits_only(barcode)
     fmt = next((f for f in meta["formats"] if f["id"] == format_id), None)
     if fmt is None:
         raise ValueError("Unknown format.")
-    category = next(c for c in meta["categories"] if c["id"] == fmt["category_id"])
+    if category_id not in fmt.get("category_ids", [fmt["category_id"]]):
+        category_id = fmt["category_id"]
+    category = next(c for c in meta["categories"] if c["id"] == category_id)
     kind = format_kind(fmt["name"])
     applies = {f["key"]: f for f in meta["fields"] if f["applies_all"] or fmt["id"] in f["format_ids"]}
     attempts: list[dict] = []
@@ -596,7 +600,7 @@ def lookup(conn: sqlite3.Connection, meta: dict, barcode: str, format_id: int, r
                 query, season = split_season(title)
                 suffix = f" - Season {season}" if season else ""
                 try:
-                    films, cached = tmdb(conn, query, key, refresh)
+                    films, cached = tmdb(conn, query, key, refresh, tv_first="tv" in category["name"].lower() or bool(season))
                     _attempt(attempts, "TMDB", "found" if films else "not_found", cached=cached)
                     exact = [f for f in films if text.match_key(f["title"]) == text.match_key(query)
                              or text.match_key(f.get("original_title")) == text.match_key(query)]

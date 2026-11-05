@@ -15,8 +15,9 @@ What the app does, and why it's built the way it is. Decisions here come from th
 ## Data model
 
 ```
-Category (Movies, Music, Games)      — decides which copies can be "the same title"; Music has an Artist
-  └─ Format (Blu-ray, VHS, Record…)  — name, case colour, physical or digital
+Category (Movies, TV, Music, Games)  — decides which copies can be "the same title"; Music has an Artist
+Format (Blu-ray, VHS, Record…)       — name, case colour, physical or digital; used by one or more
+                                       categories (Blu-ray: Movies and TV), one of them its default
 Title (the work: "GoldenEye", 1995)  — name, year (original release), artist (music), category
   └─ Item (a physical copy)          — format, barcode, box set, notes, custom column values
 Box set (The James Bond Collection)  — name, barcode on the outer box; items point to it
@@ -26,7 +27,8 @@ User                                 — username, name, role, password hash, pr
 ```
 
 - **"Other formats I own"** works because every copy belongs to a title. When you add a copy, the title box suggests existing titles in that category, and picking one links the copy. Typing a new name that exactly matches an existing title (ignoring case, punctuation, a leading "The/A/An", a leading "007", trailing edition words like "Extended", and bracketed qualifiers) links to it automatically, as long as the years match.
-- A movie and its video game are in different categories, so they never link ("GoldenEye" the film vs. *GoldenEye: Rogue Agent*).
+- A movie and its video game are in different categories, so they never link ("GoldenEye" the film vs. *GoldenEye: Rogue Agent*). The same goes for a film and a TV series with the same name.
+- **The category belongs to the title.** A format can serve several categories, so TV seasons on Blu-ray don't need a separate "TV Blu-ray" format. The Add screen asks for the category only when the chosen format has more than one. The grid's **Change category…** moves selected titles, with all their copies, in one go. Edit title can change one title's category.
 - If two different films end up linked (e.g. a remake), **Not the same title** on the title page splits a copy off. **Merge…** does the reverse.
 - **Box sets**: each film is still its own title and item, so it's searchable on its own. The item shows "In box set: …" with a link, the title page says "Part of …", and the box set page lists every item in the set. Scanning the box set's barcode finds the set and everything in it.
 
@@ -113,8 +115,19 @@ When a barcode is scanned or entered on the Add screen, the server looks it up a
 - **Keys:** optional, managed by admins in Settings → Barcode lookup, and never sent back to the browser (only the last 4 characters are shown). They can also come from environment variables.
 - **Hosts contacted:** musicbrainz.org, api.discogs.com, api.upcitemdb.com, api.themoviedb.org.
 
+## Plex sync (added after Phase 1)
+
+Plex is the source of truth for one format, normally Digital. An admin enters the Plex address and token, picks Movie and TV libraries, and runs a Preview before the first **Sync now**. After that it syncs every hour.
+
+- Each movie becomes one copy. Each TV season becomes one copy titled "Show - Season N", which matches physical season titles. Specials (season 0) are skipped.
+- A new Plex copy links to a title already in the collection with the same name (movies: year within 1; seasons: by name only), else a title is created in Movies or TV.
+- Existing copies of the format that match a Plex title are adopted. This is how the first sync takes over the Jira "Digital" items.
+- Copies whose title left Plex, and copies of the format that never came from Plex, go to the trash (restorable for 30 days). A title that comes back is restored.
+- Resolution (4K / 1080p / Other) is filled in for movies from Plex's media info.
+- **Safety:** if Plex returns no titles, nothing changes. An automatic sync won't remove more than a quarter of the copies (or 20, whichever is more) in one go; it reports instead.
+- The token is stored like the lookup keys: write-only, last 4 characters shown. The server talks to Plex's local API (default port 32400).
+
 ## Phase 2 (not built yet)
 
 - **Offline search.** A read-only copy of the collection cached on the phone, for stores with no signal.
-- **Plex sync for Digital titles.**
 - Cover art.

@@ -25,7 +25,8 @@ export interface Category {
 
 export interface Format {
   id: number;
-  category_id: number;
+  category_id: number; // default category
+  category_ids: number[]; // every category the format is used for (default first)
   name: string;
   color: string;
   physical: boolean;
@@ -50,6 +51,7 @@ export interface Meta {
   formats: Format[];
   fields: Field[];
   lookups_enabled: boolean;
+  plex_format_id: number | null;
 }
 
 export type CustomValue = string | number | boolean | string[];
@@ -174,4 +176,31 @@ export interface Integrations {
   lookups_enabled: boolean;
   keys: IntegrationKey[];
   hosts: string[];
+}
+
+export interface PlexSection {
+  key: string;
+  title: string;
+  type: "movie" | "show";
+}
+
+export interface PlexConfig {
+  url: string;
+  token_set: boolean;
+  token_hint: string | null;
+  sections: PlexSection[];
+  format_id: number | null;
+  auto_sync: boolean;
+  configured: boolean;
+  last_sync: { at: string; scheduled: boolean; plex_titles?: number; counts?: Record<string, number>; warnings?: string[]; error?: string } | null;
+}
+
+export interface PlexReport {
+  dry_run: boolean;
+  plex_titles: number;
+  format: string;
+  counts: Record<string, number>;
+  lists: Record<string, string[]>;
+  warnings: string[];
+  unchanged: number;
 }

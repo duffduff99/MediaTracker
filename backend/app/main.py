@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from .config import Settings
 from .db import connect, migrate, now
 from .maintenance import loop as maintenance_loop
-from .routes import auth, collection, data, lookups, settings as settings_routes
+from .routes import auth, collection, data, lookups, plex as plex_routes, settings as settings_routes
 from .security import LoginThrottle, hash_password
 
 log = logging.getLogger("mediatracker")
@@ -97,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(collection.router)
     app.include_router(data.router)
     app.include_router(lookups.router)
+    app.include_router(plex_routes.router)
 
     @app.get("/api/health")
     def health():

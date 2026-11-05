@@ -149,13 +149,14 @@ def to_xlsx(items: list[dict], meta: dict) -> bytes:
     for c in ws[7]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor=INK)
-    counts: dict[int, int] = {}
+    counts: dict[tuple[int, int], int] = {}
     for i in items:
-        counts[i["format_id"]] = counts.get(i["format_id"], 0) + 1
+        k = (i["format_id"], i["category_id"])
+        counts[k] = counts.get(k, 0) + 1
     r = 8
-    for fid, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+    for (fid, cid), n in sorted(counts.items(), key=lambda kv: -kv[1]):
         ws.cell(row=r, column=1, value=fmt.get(fid, {}).get("name"))
-        ws.cell(row=r, column=2, value=cat.get(fmt.get(fid, {}).get("category_id"), {}).get("name"))
+        ws.cell(row=r, column=2, value=cat.get(cid, {}).get("name"))
         ws.cell(row=r, column=3, value=n)
         r += 1
     ws.column_dimensions["A"].width = 24

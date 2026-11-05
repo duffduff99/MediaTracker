@@ -19,8 +19,15 @@ def load_meta(conn: sqlite3.Connection) -> dict[str, Any]:
     for c in categories:
         c["has_artist"] = bool(c["has_artist"])
     formats = [dict(r) for r in conn.execute("SELECT * FROM formats ORDER BY sort_order, name")]
+    cat_order = {c["id"]: i for i, c in enumerate(categories)}
+    allowed: dict[int, list[int]] = {}
+    for r in conn.execute("SELECT format_id, category_id FROM format_categories"):
+        allowed.setdefault(r["format_id"], []).append(r["category_id"])
     for f in formats:
         f["physical"] = bool(f["physical"])
+        # category_id is the default; category_ids is every category the format can be used for
+        ids = set(allowed.get(f["id"], [])) | {f["category_id"]}
+        f["category_ids"] = sorted(ids, key=lambda c: (c != f["category_id"], cat_order.get(c, 99)))
     links: dict[int, list[int]] = {}
     for r in conn.execute("SELECT field_id, format_id FROM field_formats"):
         links.setdefault(r["field_id"], []).append(r["format_id"])
@@ -31,8 +38,11 @@ def load_meta(conn: sqlite3.Connection) -> dict[str, Any]:
         f["applies_all"] = bool(f["applies_all"])
         f["format_ids"] = sorted(links.get(f["id"], []))
         fields.append(f)
-    row = conn.execute("SELECT value FROM app_settings WHERE key = 'lookups_enabled'").fetchone()
-    return {"categories": categories, "formats": formats, "fields": fields, "lookups_enabled": row is None or row["value"] != "0"}
+    st = dict(conn.execute("SELECT key, value FROM app_settings WHERE key IN ('lookups_enabled', 'plex_format_id', 'plex_last_sync')").fetchall())
+    # The format Plex keeps in sync (once it has synced): the Add screen warns that copies added by hand get removed.
+    plex_format = int(st["plex_format_id"]) if st.get("plex_format_id", "").isdigit() and st.get("plex_last_sync") else None
+    return {"categories": categories, "formats": formats, "fields": fields,
+            "lookups_enabled": st.get("lookups_enabled") != "0", "plex_format_id": plex_format}
 
 
 def field_applies(field: dict, format_id: int) -> bool:
@@ -176,8 +186,31 @@ def delete_orphan_titles(conn: sqlite3.Connection) -> int:
     return cur.rowcount
 
 
-def format_category(conn: sqlite3.Connection, format_id: int) -> int:
+def format_categories(conn: sqlite3.Connection, format_id: int) -> tuple[int, set[int]]:
+    """(default category, every category the format may be used for)."""
     row = conn.execute("SELECT category_id FROM formats WHERE id = ?", (format_id,)).fetchone()
     if row is None:
         raise HTTPException(400, "Unknown format.")
-    return row["category_id"]
+    ids = {r[0] for r in conn.execute("SELECT category_id FROM format_categories WHERE format_id = ?", (format_id,))}
+    return row["category_id"], ids | {row["category_id"]}
+
+
+def resolve_category(conn: sqlite3.Connection, format_id: int, title_id: int | None, requested: int | None) -> int:
+    """The category for a copy: its title's category, else the one asked for, else the format's default."""
+    default, allowed = format_categories(conn, format_id)
+    if title_id:
+        row = conn.execute("SELECT category_id FROM titles WHERE id = ?", (title_id,)).fetchone()
+        if row is None:
+            raise HTTPException(400, "Unknown title.")
+        category = row["category_id"]
+    else:
+        category = requested or default
+    if category not in allowed:
+        names = dict(conn.execute("SELECT id, name FROM categories").fetchall())
+        fmt = conn.execute("SELECT name FROM formats WHERE id = ?", (format_id,)).fetchone()["name"]
+        raise HTTPException(
+            400,
+            f"{fmt} isn't set up for {names.get(category, 'that category')}. "
+            "Add the category to the format in Settings → Media types.",
+        )
+    return category
