@@ -12,6 +12,28 @@ A self-hosted app for tracking a physical media collection — VHS, Laserdisc, B
 - **Jira import** for the existing collection, with automatic clean-up (see [docs/IMPORT.md](docs/IMPORT.md)).
 - **Sign-in** with Admin / Editor / Viewer roles. Light and dark mode. Installable on a phone as an app (PWA).
 
+## Screenshots
+
+These show the real app, run against an imported collection of about 2,300 items.
+
+![Overview: search bar with barcode scan, collection totals, items by format, new arrivals](docs/screenshots/overview.png)
+
+| At the store: "do I own it?" | Every format you own | Not in the collection |
+|---|---|---|
+| ![Phone search for GoldenEye showing the Laserdisc and Blu-ray grouped together, and the game separately](docs/screenshots/phone-search.png) | ![Phone title page for Air Force One, owned on Blu-ray, VHS and Laserdisc](docs/screenshots/phone-title.png) | ![Phone search with no match, offering to add to the wish list or the collection](docs/screenshots/phone-not-found.png) |
+
+**Grid view** (dark mode), filtered to Laserdisc, showing only the columns that apply to it:
+
+![Search grid filtered to Laserdisc with sortable columns, column picker and CSV/Excel export](docs/screenshots/grid.png)
+
+**Adding an item:** the title box suggests what you already own, so the new copy links to it:
+
+![Add item form suggesting existing Back to the Future titles and the formats already owned](docs/screenshots/add-item.png)
+
+| Box sets | Your own columns |
+|---|---|
+| ![The James Bond Collection box set listing each film](docs/screenshots/box-set.png) | ![Settings page for configurable columns and which formats they apply to](docs/screenshots/columns.png) |
+
 ## Running it
 
 You need Docker, and a reverse proxy that serves it over **HTTPS** (browsers only allow the camera and "install as app" on HTTPS).
