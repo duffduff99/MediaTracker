@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { api } from "../api";
+import { LookupPanel } from "../components/LookupPanel";
 import { ErrorText, FormatBadge, Icon, Modal, useToast } from "../components/ui";
 import { applyTheme, useApp } from "../state";
-import type { Category, Field, FieldType, Format, Meta, Role, User } from "../types";
+import type { Category, Field, FieldType, Format, Integrations, LookupResult, Meta, Role, User } from "../types";
 
 export function Settings() {
   const { can } = useApp();
@@ -17,6 +18,7 @@ export function Settings() {
         {can("admin") && <NavLink to="/settings/fields">Columns</NavLink>}
         {can("admin") && <NavLink to="/settings/media">Media types</NavLink>}
         {can("admin") && <NavLink to="/settings/users">Users</NavLink>}
+        {can("admin") && <NavLink to="/settings/lookup">Barcode lookup</NavLink>}
         <NavLink to="/settings/data">Import &amp; export</NavLink>
       </nav>
       <Routes>
@@ -24,6 +26,7 @@ export function Settings() {
         {can("admin") && <Route path="fields" element={<Fields />} />}
         {can("admin") && <Route path="media" element={<MediaTypes />} />}
         {can("admin") && <Route path="users" element={<Users />} />}
+        {can("admin") && <Route path="lookup" element={<LookupSettings />} />}
         <Route path="data" element={<DataTools />} />
       </Routes>
     </>
@@ -853,6 +856,219 @@ function DataTools() {
           </a>
         </div>
       )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ barcode lookup (API keys, tester)
+
+function LookupSettings() {
+  const { meta, refreshMeta } = useApp();
+  const toast = useToast();
+  const [state, setState] = useState<Integrations | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [tests, setTests] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [tryCode, setTryCode] = useState("");
+  const [tryFormat, setTryFormat] = useState<number>(meta?.formats[0]?.id ?? 0);
+  const [tryResult, setTryResult] = useState<LookupResult | null>(null);
+  const [tryBusy, setTryBusy] = useState(false);
+  const [tryError, setTryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get<Integrations>("/api/admin/integrations").then(setState).catch((e) => setError(e.message));
+  }, []);
+
+  const save = async (body: { lookups_enabled?: boolean; values?: Record<string, string> }) => {
+    setError(null);
+    try {
+      setState(await api.put<Integrations>("/api/admin/integrations", body));
+      await refreshMeta();
+      return true;
+    } catch (e) {
+      setError((e as Error).message);
+      return false;
+    }
+  };
+
+  const test = async (key: string) => {
+    setTests((t) => ({ ...t, [key]: { ok: false, message: "Testing…" } }));
+    const r = await api.post<{ ok: boolean; message: string }>("/api/admin/integrations/test", { key });
+    setTests((t) => ({ ...t, [key]: r }));
+  };
+
+  const tryLookup = async (e: FormEvent) => {
+    e.preventDefault();
+    setTryBusy(true);
+    setTryError(null);
+    setTryResult(null);
+    try {
+      setTryResult(await api.get<LookupResult>(`/api/lookup?barcode=${encodeURIComponent(tryCode)}&format_id=${tryFormat}&refresh=true`));
+    } catch (err) {
+      setTryError((err as Error).message);
+    } finally {
+      setTryBusy(false);
+    }
+  };
+
+  if (!state) return <ErrorText error={error} />;
+
+  return (
+    <div className="stack">
+      <div className="card form">
+        <h2 className="card-title">Barcode lookup</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          When you scan or enter a barcode on the Add screen, MediaTracker can suggest the title, year, artist and some columns from free online
+          databases. Music uses MusicBrainz, then Discogs. Movies, TV and games use UPCitemdb, then TMDB for the proper title and year. You always
+          review the suggestion before saving.
+        </p>
+        <label className="check">
+          <input type="checkbox" checked={state.lookups_enabled} onChange={(e) => save({ lookups_enabled: e.target.checked })} />
+          Look up barcodes online
+        </label>
+        <ErrorText error={error} />
+      </div>
+
+      <div className="card form">
+        <h2 className="card-title">Optional keys</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          MusicBrainz and the free UPCitemdb tier work without any key. These add more sources. Keys are stored in the app's database, and once
+          saved they're never shown again, only their last 4 characters.
+        </p>
+        <ul className="list">
+          {state.keys.map((k) => (
+            <li key={k.key} style={{ alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
+              <div className="row" style={{ width: "100%" }}>
+                <strong style={{ flex: 1 }}>{k.label}</strong>
+                <span className={k.set ? "small" : "small muted"}>
+                  {k.set ? (k.from_env ? `Set by the ${k.env} environment variable` : `Saved ${k.hint ?? ""}`) : "Not set"}
+                </span>
+              </div>
+              <span className="small muted">
+                {k.help}{" "}
+                <a href={k.url} target="_blank" rel="noopener noreferrer">
+                  Get one ↗
+                </a>
+              </span>
+              <form
+                className="input-row"
+                style={{ width: "100%" }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!drafts[k.key]?.trim()) return;
+                  if (await save({ values: { [k.key]: drafts[k.key] } })) {
+                    setDrafts((d) => ({ ...d, [k.key]: "" }));
+                    toast(`${k.label} saved`);
+                  }
+                }}
+              >
+                <label className="visually-hidden" htmlFor={`key-${k.key}`}>
+                  {k.label}
+                </label>
+                <input
+                  id={`key-${k.key}`}
+                  className="input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={k.set ? "Enter a new value to replace it" : "Paste the key here"}
+                  value={drafts[k.key] ?? ""}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [k.key]: e.target.value }))}
+                />
+                <button className="btn primary sm" type="submit">
+                  Save
+                </button>
+              </form>
+              <div className="row">
+                {k.set && k.key !== "upcitemdb_key" && (
+                  <button className="btn sm" type="button" onClick={() => test(k.key)}>
+                    Test
+                  </button>
+                )}
+                {k.set && !k.from_env && (
+                  <button
+                    className="btn sm danger"
+                    type="button"
+                    onClick={async () => {
+                      if (confirm(`Remove the ${k.label}?`)) await save({ values: { [k.key]: "" } });
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+                {tests[k.key] && <span className={tests[k.key].ok ? "small" : "small error"}>{tests[k.key].message}</span>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="card form">
+        <h2 className="card-title">Firewall</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          The server (not your phone) contacts these hosts over HTTPS (port 443). Allow them if your network restricts outbound traffic:
+        </p>
+        <ul style={{ margin: 0, paddingLeft: 20 }}>
+          {state.hosts.map((h) => (
+            <li key={h}>
+              <code>{h}</code>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <form className="card form" onSubmit={tryLookup}>
+        <h2 className="card-title">Try a barcode</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Runs a fresh lookup (ignoring saved results) and shows what each source answered. Useful for checking keys and the firewall.
+        </p>
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor="try-format">Format</label>
+            <select id="try-format" className="input" value={tryFormat} onChange={(e) => setTryFormat(Number(e.target.value))}>
+              {meta?.formats.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="try-code">Barcode</label>
+            <input id="try-code" className="input" inputMode="numeric" value={tryCode} onChange={(e) => setTryCode(e.target.value)} required />
+          </div>
+        </div>
+        <div className="row">
+          <button className="btn primary" type="submit" disabled={tryBusy || !state.lookups_enabled}>
+            {tryBusy ? "Looking up…" : "Look up"}
+          </button>
+          <button
+            className="btn sm ghost"
+            type="button"
+            onClick={async () => {
+              const r = await api.post<{ count: number }>("/api/admin/lookup-cache/clear");
+              toast(`Cleared ${r.count} saved lookup result(s)`);
+            }}
+          >
+            Clear saved results
+          </button>
+        </div>
+        <LookupPanel result={tryResult} loading={tryBusy} error={tryError} formatId={tryFormat} />
+        {tryResult && (
+          <ul className="small" style={{ margin: 0, paddingLeft: 20 }}>
+            {tryResult.attempts.map((a) => (
+              <li key={a.source}>
+                <strong>{a.source}</strong>: {a.status.replace("_", " ")}
+                {a.message ? ` — ${a.message}` : ""}
+              </li>
+            ))}
+            {tryResult.product_name && (
+              <li>
+                <strong>Product name</strong>: {tryResult.product_name}
+              </li>
+            )}
+          </ul>
+        )}
+      </form>
     </div>
   );
 }

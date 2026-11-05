@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, qs } from "../api";
 import { FieldInput } from "../components/FieldInput";
+import { LookupPanel } from "../components/LookupPanel";
 import { Scanner } from "../components/Scanner";
 import { ErrorText, FormatBadge, Icon, useToast } from "../components/ui";
 import { useApp } from "../state";
-import type { BoxSet, CustomValue, Item, TitleDetail, TitleHit } from "../types";
+import type { BoxSet, CustomValue, Item, LookupCandidate, LookupResult, TitleDetail, TitleHit } from "../types";
 
 const LAST_FORMAT = "mt-last-format";
 
@@ -42,6 +43,11 @@ export function ItemForm() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const lookupCategory = useRef<number | null>(null);
+  const autoLookupDone = useRef(false);
 
   // default format once meta loads
   useEffect(() => {
@@ -83,6 +89,64 @@ export function ItemForm() {
 
   const format = formatById(formatId);
   const category = categoryById(format?.category_id ?? 0);
+
+  const runLookup = async (code: string, fmtId: number, refresh = false) => {
+    if (!meta?.lookups_enabled || code.replace(/\D/g, "").length < 6 || !fmtId) return;
+    setLookingUp(true);
+    setLookupError(null);
+    setLookupResult(null);
+    lookupCategory.current = formatById(fmtId)?.category_id ?? null;
+    try {
+      setLookupResult(await api.get<LookupResult>(`/api/lookup${qs({ barcode: code, format_id: fmtId, refresh })}`));
+    } catch (e) {
+      setLookupError((e as Error).message);
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  // Arriving with a scanned barcode (e.g. "Not in your collection → Add"): look it up once.
+  useEffect(() => {
+    if (editing || autoLookupDone.current || !meta || !format || !params.get("barcode")) return;
+    autoLookupDone.current = true;
+    runLookup(params.get("barcode") ?? "", format.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta, format]);
+
+  // Switching to a format in another category (e.g. Blu-ray → CD) uses different sources: look up again.
+  useEffect(() => {
+    if (lookupResult && format && lookupCategory.current !== null && format.category_id !== lookupCategory.current) {
+      runLookup(barcode, format.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [format?.category_id]);
+
+  const mergeCustom = (c: LookupCandidate) => {
+    const allowed = new Set(format ? fieldsFor([format.id]).map((f) => f.key) : []);
+    setCustom((cur) => {
+      const next = { ...cur };
+      for (const [k, v] of Object.entries(c.custom)) if (allowed.has(k) && next[k] === undefined) next[k] = v;
+      return next;
+    });
+  };
+
+  const applyCandidate = (c: LookupCandidate) => {
+    setLinked(null);
+    setTitleText(c.title ?? "");
+    setYear(c.year ? String(c.year) : "");
+    setArtist(c.artist ?? "");
+    mergeCustom(c);
+    setLookupResult(null);
+    toast(`Filled in from ${c.source} — check it before saving`);
+  };
+
+  const linkCandidate = (t: TitleHit, c: LookupCandidate | null) => {
+    setLinked(t);
+    setTitleText(t.name);
+    if (c) mergeCustom(c);
+    setLookupResult(null);
+    toast(`Linked to your existing “${t.name}”`);
+  };
 
   // unlink a title from another category if the format changes category
   useEffect(() => {
@@ -220,7 +284,7 @@ export function ItemForm() {
             </select>
           </div>
 
-          <div className="field" style={{ gridColumn: "span 2" }}>
+          <div className="field span-2">
             <label htmlFor="title">{category?.has_artist ? "Album title" : "Title"}</label>
             {linked ? (
               <div className="linked">
@@ -299,6 +363,17 @@ export function ItemForm() {
                 <button type="button" className="icon-btn" aria-label="Scan barcode" onClick={() => setScanning(true)}>
                   <Icon name="barcode" />
                 </button>
+                {meta?.lookups_enabled && (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={lookingUp || barcode.replace(/\D/g, "").length < 6}
+                    onClick={() => format && runLookup(barcode, format.id)}
+                    title="Fill in details from online databases"
+                  >
+                    Look up
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -320,6 +395,20 @@ export function ItemForm() {
             </div>
           </div>
         </div>
+
+        <LookupPanel
+          result={lookupResult}
+          loading={lookingUp}
+          error={lookupError}
+          formatId={format?.id ?? null}
+          onUse={applyCandidate}
+          onLink={linkCandidate}
+          onDismiss={() => {
+            setLookupResult(null);
+            setLookupError(null);
+          }}
+          onRetry={() => format && runLookup(barcode, format.id, true)}
+        />
 
         {dupes.length > 0 && (
           <div className="notice warn" role="status">
@@ -384,6 +473,7 @@ export function ItemForm() {
           onDetected={(code) => {
             setScanning(false);
             setBarcode(code);
+            if (format) runLookup(code, format.id);
           }}
         />
       )}

@@ -49,6 +49,7 @@ export interface Meta {
   categories: Category[];
   formats: Format[];
   fields: Field[];
+  lookups_enabled: boolean;
 }
 
 export type CustomValue = string | number | boolean | string[];
@@ -129,4 +130,48 @@ export interface Stats {
   by_format: { format_id: number; count: number }[];
   by_category: { category_id: number; count: number }[];
   recent: Item[];
+}
+
+export interface LookupCandidate {
+  title: string | null;
+  artist: string | null;
+  year: number | null;
+  custom: Record<string, CustomValue>;
+  source: string;
+  url: string | null;
+  detail: string | null;
+}
+
+export interface LookupAttempt {
+  source: string;
+  status: "found" | "not_found" | "skipped" | "rate_limited" | "unreachable" | "auth" | "error";
+  message: string;
+  cached: boolean;
+}
+
+export interface LookupResult {
+  barcode: string;
+  suggestion: LookupCandidate | null;
+  candidates: LookupCandidate[];
+  product_name: string | null;
+  warnings: string[];
+  attempts: LookupAttempt[];
+  existing_titles: TitleHit[];
+}
+
+export interface IntegrationKey {
+  key: string;
+  label: string;
+  help: string;
+  url: string;
+  env: string;
+  set: boolean;
+  from_env: boolean;
+  hint: string | null;
+}
+
+export interface Integrations {
+  lookups_enabled: boolean;
+  keys: IntegrationKey[];
+  hosts: string[];
 }

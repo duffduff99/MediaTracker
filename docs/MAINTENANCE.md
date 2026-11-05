@@ -96,6 +96,26 @@ See [IMPORT.md](IMPORT.md). In short: **Settings → Import & export → Import 
   - **iPhone:** Share → **Add to Home Screen**.
   - **Android (Chrome):** ⋮ → **Install app**.
 
+### 2.6 Barcode lookup (optional)
+
+When you scan a barcode on the Add screen, the app can fill in the title, year, artist and some columns from free online databases. It works out of the box for music (MusicBrainz) and gives basic product names for discs and games (UPCitemdb). Two free keys make it better:
+
+- **TMDB API key**: proper movie and TV titles and the original release year. Create a free account at themoviedb.org, then go to Settings → API. Either the "API Key" or the "API Read Access Token" works.
+- **Discogs personal access token**: a second source for records, cassettes and CDs. Create a free account, then go to Settings → Developers → Generate new token.
+
+Paste them in **Settings → Barcode lookup** (admins only) and press **Test**. That page also has a **Try a barcode** box that shows what each source answered, and a switch to turn lookups off entirely.
+
+**Firewall:** the server, not your phone, makes these requests over HTTPS (port 443) to:
+
+| Host | Used for |
+|---|---|
+| `musicbrainz.org` | Music (no key) |
+| `api.discogs.com` | Music (with a Discogs token) |
+| `api.upcitemdb.com` | Product names for movies, TV and games (free tier, about 100 lookups/day) |
+| `api.themoviedb.org` | Movie/TV titles and years (with a TMDB key) |
+
+Results are saved in the database (found: 90 days, not found: 7 days), so scanning the same item again doesn't use up the daily UPCitemdb allowance. The keys are stored in the database too, which means they're in your backups. They're free keys, but treat backups accordingly.
+
 ## 3. Routine maintenance
 
 ### Monthly: update (≈ 2 minutes)
@@ -143,8 +163,9 @@ Set these as Dockhand stack variables, or in a `.env` file next to the compose f
 | `MT_TRASH_DAYS` | `30` | Days before items in the trash are deleted permanently |
 | `MT_SESSION_DAYS` | `30` | How long a sign-in lasts |
 | `MT_FORWARDED_ALLOW_IPS` | `*` | Which proxy IPs the app trusts for forwarded headers. Set it to your proxy's IP to be strict |
+| `MT_TMDB_API_KEY`, `MT_DISCOGS_TOKEN`, `MT_UPCITEMDB_KEY` | none | Barcode lookup keys, if you'd rather set them here than in **Settings → Barcode lookup**. A key saved in the app takes priority |
 
-The last five aren't listed in the compose file. To use one, add it under `environment:` as `MT_BACKUP_KEEP: "${MT_BACKUP_KEEP:-14}"`.
+The last five rows (from `MT_BACKUP_KEEP` down) aren't listed in the compose file. To use one, add it under `environment:` as `MT_BACKUP_KEEP: "${MT_BACKUP_KEEP:-14}"`.
 
 ## 5. Restore and roll back
 
@@ -169,6 +190,9 @@ Then start the stack again. If you use an `MT_DATA` folder, put that path in pla
 | Scan button says the camera needs HTTPS | You opened the app over `http://` or by IP address. Use the HTTPS address from your reverse proxy |
 | Camera permission denied | iPhone: Settings → Safari → Camera → Allow. Android: tap the lock icon in the address bar → Permissions → Camera |
 | "Install app" isn't offered on Android | Usually means no HTTPS, or a certificate the phone doesn't trust |
+| Barcode lookup says "couldn't connect" | The server can't reach that host. Check the firewall list in §2.6, then use **Settings → Barcode lookup → Try a barcode** |
+| Barcode lookup says "limit reached" | The free UPCitemdb tier allows about 100 lookups a day; it resets the next day. Music lookups aren't affected |
+| Barcode lookup says "key rejected" | Re-paste the key in **Settings → Barcode lookup** and press **Test** |
 | Phone can't reach it away from home | WireGuard isn't connected, or the tunnel doesn't route/resolve your internal hostname |
 | Jira import fails with "413" or "too large" | Your reverse proxy's upload limit. See §2.3 |
 | Container keeps restarting | Check the logs. The most common cause is an `MT_DATA` folder that uid 1000 can't write to. Fix with `sudo chown -R 1000:1000 /your/data/folder` |

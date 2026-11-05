@@ -95,9 +95,26 @@ The "Hi-Fi Rental" direction (option C from the design mockups):
   - a styled, frozen, filterable header row and striped rows;
   - set up to print landscape, one page wide, repeating the header, with page numbers.
 
+## Barcode lookup (added after Phase 1)
+
+When a barcode is scanned or entered on the Add screen, the server looks it up and suggests details. The person reviews the suggestion before saving. The sources depend on the category of the chosen format:
+
+| Category | Sources, in order | What gets filled in |
+|---|---|---|
+| Music (categories with an Artist) | MusicBrainz, then Discogs (if a token is set) | Album title, artist, original release year, Catalog # |
+| Movies / TV | UPCitemdb product name, cleaned up, then TMDB (if a key is set) | Title (with "Season N" kept for TV), original release year, Edition, Steelbook tag, Combo pack |
+| Games | UPCitemdb product name, cleaned up | Title |
+
+- **Picking the best match:** music releases whose media matches the chosen format (CD, vinyl, cassette) are preferred. The year is the album's *first* release, from the MusicBrainz release group or the Discogs master release.
+- **Cleaning product names:** "GoldenEye (Blu-ray Disc, 2015)" → "GoldenEye", "Halo 3 - Xbox 360" → "Halo 3", "Disney Frozen …" → "Frozen". Format, platform and edition words are removed, and a few studio names are dropped (Disney, Pixar, DreamWorks, Marvel Studios). Words that can be part of a real title are kept ("Universal Soldier").
+- **Format check:** if the product name mentions a different format from the one chosen (a DVD scanned as Blu-ray), the app warns.
+- **Linking:** if the suggested title already exists in the collection, the app offers to link the new copy to it.
+- **Cache:** source answers are cached in the database (found: 90 days, not found: 7 days), and errors aren't cached.
+- **Keys:** optional, managed by admins in Settings → Barcode lookup, and never sent back to the browser (only the last 4 characters are shown). They can also come from environment variables.
+- **Hosts contacted:** musicbrainz.org, api.discogs.com, api.upcitemdb.com, api.themoviedb.org.
+
 ## Phase 2 (not built yet)
 
-- **Barcode auto-fill.** Look up details from a scanned barcode: Discogs or MusicBrainz for music, UPC databases plus TMDB for discs, title only for games. VHS and Laserdisc coverage is poor.
 - **Offline search.** A read-only copy of the collection cached on the phone, for stores with no signal.
 - **Plex sync for Digital titles.**
 - Cover art.

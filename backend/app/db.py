@@ -135,6 +135,22 @@ MIGRATIONS: list[str] = [
         done_at TEXT
     );
     """,
+    # 2 — settings managed in the app (API keys for barcode lookups) and a cache of lookup results
+    """
+    CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE lookup_cache (
+        source TEXT NOT NULL,
+        query TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        PRIMARY KEY (source, query)
+    );
+    """,
 ]
 
 
