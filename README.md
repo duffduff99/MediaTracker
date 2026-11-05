@@ -6,7 +6,8 @@ A self-hosted app for tracking a physical media collection — VHS, Laserdisc, B
 - **Barcode lookup** when adding items: the title, artist, original year and more are filled in from MusicBrainz, Discogs, UPCitemdb and TMDB. Optional free keys are managed in the app.
 - **Configurable grid** with sortable, show/hide columns. Columns only appear for the formats they apply to (Max players for games, Aspect ratio for Laserdisc/VHS…).
 - **Your own columns**: add, rename, reorder or delete columns, and edit dropdown options (e.g. Condition) — all in the app.
-- **Media types** (formats and categories) managed in the app, each with its case colour.
+- **Media types** (formats and categories) managed in the app, each with its case colour. A format can serve several categories (Blu-ray for Movies and TV).
+- **Plex sync**: your Plex movies and TV seasons are kept as Digital copies, linked to the discs you own, and updated hourly.
 - **Box sets**: each film stays searchable on its own and links to the set; the set page lists everything in it.
 - **Overview** dashboard, **wish list** (a simple to-do list), **trash** with 30-day restore.
 - **Export** to CSV or a print-ready Excel workbook (one sheet per format).

@@ -38,8 +38,11 @@ def load_meta(conn: sqlite3.Connection) -> dict[str, Any]:
         f["applies_all"] = bool(f["applies_all"])
         f["format_ids"] = sorted(links.get(f["id"], []))
         fields.append(f)
-    row = conn.execute("SELECT value FROM app_settings WHERE key = 'lookups_enabled'").fetchone()
-    return {"categories": categories, "formats": formats, "fields": fields, "lookups_enabled": row is None or row["value"] != "0"}
+    st = dict(conn.execute("SELECT key, value FROM app_settings WHERE key IN ('lookups_enabled', 'plex_format_id', 'plex_last_sync')").fetchall())
+    # The format Plex keeps in sync (once it has synced): the Add screen warns that copies added by hand get removed.
+    plex_format = int(st["plex_format_id"]) if st.get("plex_format_id", "").isdigit() and st.get("plex_last_sync") else None
+    return {"categories": categories, "formats": formats, "fields": fields,
+            "lookups_enabled": st.get("lookups_enabled") != "0", "plex_format_id": plex_format}
 
 
 def field_applies(field: dict, format_id: int) -> bool:

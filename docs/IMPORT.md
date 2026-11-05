@@ -31,7 +31,7 @@ Numbers in brackets are from the export analysed on 5 Nov 2026 (2,287 rows).
 | Audio, Edition, Aspect Ratio, Max Player Count, Resolution, 3D Support | The matching columns |
 | Additional Formats | Combo pack |
 | Certification = THX | THX = Yes |
-| Labels | Tags |
+| Labels | Tags. Items labelled **TV** also go into the TV category |
 | Description, Comment | Notes |
 | Creator | "Added by" |
 | Created | "Added" date |

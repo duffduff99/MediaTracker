@@ -116,6 +116,21 @@ Paste them in **Settings → Barcode lookup** (admins only) and press **Test**. 
 
 Results are saved in the database (found: 90 days, not found: 7 days), so scanning the same item again doesn't use up the daily UPCitemdb allowance. The keys are stored in the database too, which means they're in your backups. They're free keys, but treat backups accordingly.
 
+### 2.7 Plex sync (optional)
+
+Plex can keep your **Digital** items up to date. Each movie and each TV season in Plex becomes a Digital copy, linked to the discs you own of the same title. Titles removed from Plex go to the trash.
+
+1. **Settings → Plex**: enter the Plex address as the MediaTracker server sees it (e.g. `http://192.168.1.20:32400`) and your **Plex token**. To find the token, open Plex Web, go to any movie → ⋯ → **Get Info** → **View XML**, and copy the value after `X-Plex-Token=` in that page's address. Press **Save**, then **Test connection**.
+2. Tick the Movie and TV libraries to sync, and check that **Plex manages this format** says Digital.
+3. Press **Preview** and read what it would change. The first sync takes over your existing Digital items: matching ones are kept, and the rest go to the trash, restorable for 30 days.
+4. Press **Sync now**. After the first sync it runs every hour; there's a switch to turn that off.
+
+Notes:
+- **Network:** the MediaTracker container must reach the Plex server on port 32400. If Plex's **Secure connections** setting is "Required", plain `http://` is refused. Use the server's `https://…plex.direct:32400` address instead, or set it to "Preferred".
+- **TV seasons** are named "Show - Season N", the same way as your Blu-ray seasons, so they link. Specials (season 0) are skipped.
+- **Adding Digital items by hand** isn't useful once Plex manages Digital: the next sync removes them. Add the title in Plex instead.
+- **Safety:** if Plex returns nothing (e.g. it's down), nothing changes. An automatic sync won't remove more than a quarter of the Digital items at once; the last-sync line says so if that happens. A manual **Sync now** applies it.
+
 ## 3. Routine maintenance
 
 ### Monthly: update (≈ 2 minutes)
@@ -193,6 +208,9 @@ Then start the stack again. If you use an `MT_DATA` folder, put that path in pla
 | Barcode lookup says "couldn't connect" | The server can't reach that host. Check the firewall list in §2.6, then use **Settings → Barcode lookup → Try a barcode** |
 | Barcode lookup says "limit reached" | The free UPCitemdb tier allows about 100 lookups a day; it resets the next day. Music lookups aren't affected |
 | Barcode lookup says "key rejected" | Re-paste the key in **Settings → Barcode lookup** and press **Test** |
+| Plex test says "couldn't reach Plex" | Check the address and port, and that the MediaTracker server can reach the Plex server. With Secure connections set to "Required", use the plex.direct address (§2.7) |
+| Plex test says the token was refused | Get a fresh token (§2.7). Tokens change if you sign out of all devices in Plex |
+| A TV season shows up twice (Movies and TV) | It was in Movies before the TV category existed. Merge the two titles, or select them in the grid and use **Change category…** |
 | Phone can't reach it away from home | WireGuard isn't connected, or the tunnel doesn't route/resolve your internal hostname |
 | Jira import fails with "413" or "too large" | Your reverse proxy's upload limit. See §2.3 |
 | Container keeps restarting | Check the logs. The most common cause is an `MT_DATA` folder that uid 1000 can't write to. Fix with `sudo chown -R 1000:1000 /your/data/folder` |

@@ -4,7 +4,7 @@ import { api } from "../api";
 import { LookupPanel } from "../components/LookupPanel";
 import { ErrorText, FormatBadge, Icon, Modal, useToast } from "../components/ui";
 import { applyTheme, useApp } from "../state";
-import type { Category, Field, FieldType, Format, Integrations, LookupResult, Meta, Role, User } from "../types";
+import type { Category, Field, FieldType, Format, Integrations, LookupResult, Meta, PlexConfig, PlexReport, PlexSection, Role, User } from "../types";
 
 export function Settings() {
   const { can } = useApp();
@@ -19,6 +19,7 @@ export function Settings() {
         {can("admin") && <NavLink to="/settings/media">Media types</NavLink>}
         {can("admin") && <NavLink to="/settings/users">Users</NavLink>}
         {can("admin") && <NavLink to="/settings/lookup">Barcode lookup</NavLink>}
+        {can("admin") && <NavLink to="/settings/plex">Plex</NavLink>}
         <NavLink to="/settings/data">Import &amp; export</NavLink>
       </nav>
       <Routes>
@@ -27,6 +28,7 @@ export function Settings() {
         {can("admin") && <Route path="media" element={<MediaTypes />} />}
         {can("admin") && <Route path="users" element={<Users />} />}
         {can("admin") && <Route path="lookup" element={<LookupSettings />} />}
+        {can("admin") && <Route path="plex" element={<PlexSettings />} />}
         <Route path="data" element={<DataTools />} />
       </Routes>
     </>
@@ -1103,6 +1105,250 @@ function LookupSettings() {
           </ul>
         )}
       </form>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ Plex
+
+const PLEX_LABELS: [string, string][] = [
+  ["added", "New copies added"],
+  ["linked", "Existing items taken over (matched to Plex)"],
+  ["restored", "Restored from the trash (back in Plex)"],
+  ["updated", "Resolution updated"],
+  ["removed", "Moved to the trash (not in Plex)"],
+];
+
+function PlexSettings() {
+  const { meta, refreshMeta } = useApp();
+  const toast = useToast();
+  const [cfg, setCfg] = useState<PlexConfig | null>(null);
+  const [url, setUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [available, setAvailable] = useState<PlexSection[] | null>(null);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
+  const [report, setReport] = useState<PlexReport | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    const c = await api.get<PlexConfig>("/api/admin/plex");
+    setCfg(c);
+    setUrl(c.url);
+  };
+  useEffect(() => {
+    load().catch((e) => setError(e.message));
+  }, []);
+
+  const save = async (body: Record<string, unknown>) => {
+    setError(null);
+    // show checkbox/select changes straight away; the server's answer then replaces it
+    const { sections, format_id, auto_sync } = body as Partial<PlexConfig>;
+    setCfg((c) => (c ? { ...c, ...(sections && { sections }), ...(format_id && { format_id }), ...(auto_sync !== undefined && { auto_sync }) } : c));
+    try {
+      setCfg(await api.put<PlexConfig>("/api/admin/plex", body));
+      return true;
+    } catch (e) {
+      setError((e as Error).message);
+      await load();
+      return false;
+    }
+  };
+
+  const test = async () => {
+    setBusy("test");
+    setTestMsg(null);
+    try {
+      const r = await api.post<{ ok: boolean; message: string; sections?: PlexSection[] }>("/api/admin/plex/test");
+      setTestMsg(r);
+      setAvailable(r.sections ?? null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const run = async (dry: boolean) => {
+    setBusy(dry ? "preview" : "sync");
+    setError(null);
+    try {
+      const r = await api.post<PlexReport>("/api/admin/plex/sync", { dry_run: dry });
+      setReport(r);
+      if (!dry) {
+        toast("Plex sync finished");
+        await load();
+        await refreshMeta();
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!cfg) return <ErrorText error={error} />;
+  const digitalFormats = (meta?.formats ?? []).filter((f) => !f.physical);
+  const sectionChoices = available ?? cfg.sections;
+  const selected = new Set(cfg.sections.map((s) => s.key));
+  const formatName = meta?.formats.find((f) => f.id === cfg.format_id)?.name ?? "Digital";
+
+  return (
+    <div className="stack">
+      <div className="card form">
+        <h2 className="card-title">Plex</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Keeps your <strong>{formatName}</strong> items in step with your Plex server: each movie, and each TV season (as “Show – Season N”), becomes
+          a {formatName} copy linked to the titles you own on disc. Titles removed from Plex go to the trash. {formatName} items that aren't in
+          Plex are removed too, because Plex is the list.
+        </p>
+      </div>
+
+      <form
+        className="card form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const body: Record<string, unknown> = { url };
+          if (token.trim()) body.token = token;
+          if (await save(body)) {
+            setToken("");
+            toast("Saved");
+          }
+        }}
+      >
+        <h2 className="card-title">1. Connect</h2>
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor="plex-url">Plex address</label>
+            <input id="plex-url" className="input" placeholder="http://192.168.1.20:32400" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <span className="hint">Your Plex server's local address and port, as seen from the MediaTracker server.</span>
+          </div>
+          <div className="field">
+            <label htmlFor="plex-token">Plex token {cfg.token_set && <span className="muted">(saved {cfg.token_hint})</span>}</label>
+            <input
+              id="plex-token"
+              className="input"
+              type="password"
+              autoComplete="off"
+              placeholder={cfg.token_set ? "Enter a new token to replace it" : "Paste the X-Plex-Token"}
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            <span className="hint">
+              In Plex Web, open any movie → ⋯ → Get Info → View XML. The token is the <code>X-Plex-Token=…</code> part of that page's address.
+            </span>
+          </div>
+        </div>
+        <div className="row">
+          <button className="btn primary" type="submit">
+            Save
+          </button>
+          <button className="btn" type="button" disabled={!cfg.url || !cfg.token_set || busy !== null} onClick={test}>
+            {busy === "test" ? "Testing…" : "Test connection"}
+          </button>
+          {testMsg && <span className={testMsg.ok ? "small" : "small error"}>{testMsg.message}</span>}
+        </div>
+        <ErrorText error={error} />
+      </form>
+
+      <div className="card form">
+        <h2 className="card-title">2. Choose what to sync</h2>
+        {sectionChoices.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>Press Test connection to list your Plex libraries.</p>
+        ) : (
+          <div className="field">
+            <span className="field-label">Libraries</span>
+            {sectionChoices.map((sct) => (
+              <label key={sct.key} className="check">
+                <input
+                  type="checkbox"
+                  checked={selected.has(sct.key)}
+                  onChange={(e) => {
+                    const next = e.target.checked ? [...cfg.sections, sct] : cfg.sections.filter((x) => x.key !== sct.key);
+                    save({ sections: next });
+                  }}
+                />
+                {sct.title} <span className="small muted">({sct.type === "show" ? "TV shows, one copy per season" : "movies"})</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="field" style={{ maxWidth: 360 }}>
+          <label htmlFor="plex-format">Plex manages this format</label>
+          <select id="plex-format" className="input" value={cfg.format_id ?? ""} onChange={(e) => save({ format_id: Number(e.target.value) })}>
+            <option value="" disabled>
+              Choose…
+            </option>
+            {(digitalFormats.length ? digitalFormats : meta?.formats ?? []).map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="card form">
+        <h2 className="card-title">3. Sync</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Run a <strong>Preview</strong> first: it shows exactly what would change and saves nothing. The first sync takes over your existing{" "}
+          {formatName} items. Matching ones are kept and linked to Plex; the rest go to the trash, where you can restore them for 30 days.
+        </p>
+        <div className="row">
+          <button className="btn" type="button" disabled={!cfg.configured || busy !== null} onClick={() => run(true)}>
+            {busy === "preview" ? "Checking Plex…" : "Preview"}
+          </button>
+          <button
+            className="btn primary"
+            type="button"
+            disabled={!cfg.configured || busy !== null}
+            onClick={() => {
+              if (!cfg.last_sync && !confirm(`Run the first sync? ${formatName} items that aren't in Plex will be moved to the trash.`)) return;
+              run(false);
+            }}
+          >
+            {busy === "sync" ? "Syncing…" : "Sync now"}
+          </button>
+        </div>
+        <label className="check">
+          <input type="checkbox" checked={cfg.auto_sync} disabled={!cfg.configured} onChange={(e) => save({ auto_sync: e.target.checked })} />
+          Sync automatically every hour
+        </label>
+        {cfg.last_sync && (
+          <p className="small muted" style={{ margin: 0 }}>
+            Last sync {new Date(cfg.last_sync.at).toLocaleString()}
+            {cfg.last_sync.scheduled ? " (automatic)" : ""}:{" "}
+            {cfg.last_sync.error
+              ? `failed — ${cfg.last_sync.error}`
+              : Object.entries(cfg.last_sync.counts ?? {}).map(([k, v]) => `${v} ${k}`).join(", ") || "no changes"}
+            {cfg.last_sync.warnings?.length ? ` — ${cfg.last_sync.warnings.join(" ")}` : ""}
+          </p>
+        )}
+        {report && (
+          <div className={report.dry_run ? "notice warn" : "notice"}>
+            <strong>
+              {report.dry_run ? "Preview — nothing has been changed yet." : "Sync finished."} Plex has {report.plex_titles.toLocaleString()} titles;{" "}
+              {report.unchanged.toLocaleString()} already matched.
+            </strong>
+            {report.warnings.map((w) => (
+              <p key={w} className="error" style={{ margin: "6px 0 0" }}>
+                {w}
+              </p>
+            ))}
+            {PLEX_LABELS.filter(([k]) => report.counts[k]).map(([k, label]) => (
+              <details key={k} style={{ marginTop: 8 }}>
+                <summary>
+                  {label}: <strong>{report.counts[k].toLocaleString()}</strong>
+                </summary>
+                <ul className="report-list">
+                  {(report.lists[k] ?? []).map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              </details>
+            ))}
+            {Object.keys(report.counts).length === 0 && <p style={{ margin: "6px 0 0" }}>Everything already matches Plex.</p>}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

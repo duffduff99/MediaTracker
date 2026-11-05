@@ -435,6 +435,13 @@ export function ItemForm() {
           onRetry={() => format && runLookup(barcode, format.id, categoryId, true)}
         />
 
+        {meta?.plex_format_id && format?.id === meta.plex_format_id && !editing && (
+          <div className="notice warn" role="status">
+            <strong>{format.name} is kept in step with Plex.</strong> Items added here by hand are removed at the next sync. Add the title in Plex
+            instead and it will appear within the hour.
+          </div>
+        )}
+
         {dupes.length > 0 && (
           <div className="notice warn" role="status">
             <strong>This barcode is already in your collection:</strong>{" "}
