@@ -31,7 +31,8 @@ def load_meta(conn: sqlite3.Connection) -> dict[str, Any]:
         f["applies_all"] = bool(f["applies_all"])
         f["format_ids"] = sorted(links.get(f["id"], []))
         fields.append(f)
-    return {"categories": categories, "formats": formats, "fields": fields}
+    row = conn.execute("SELECT value FROM app_settings WHERE key = 'lookups_enabled'").fetchone()
+    return {"categories": categories, "formats": formats, "fields": fields, "lookups_enabled": row is None or row["value"] != "0"}
 
 
 def field_applies(field: dict, format_id: int) -> bool:

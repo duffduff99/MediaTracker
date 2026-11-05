@@ -3,6 +3,7 @@
 A self-hosted app for tracking a physical media collection — VHS, Laserdisc, Blu-ray, 4K, records, CDs, cassettes, video games — built for one job above all: **standing in a thrift store and finding out in two seconds whether you already own something.**
 
 - **"Do I already own it?" search** by title, artist or barcode, with a camera barcode scanner on your phone. Results are grouped by title, so you see every format you own at once (GoldenEye → Blu-ray in the Bond box set, Laserdisc).
+- **Barcode lookup** when adding items: the title, artist, original year and more are filled in from MusicBrainz, Discogs, UPCitemdb and TMDB. Optional free keys are managed in the app.
 - **Configurable grid** with sortable, show/hide columns. Columns only appear for the formats they apply to (Max players for games, Aspect ratio for Laserdisc/VHS…).
 - **Your own columns**: add, rename, reorder or delete columns, and edit dropdown options (e.g. Condition) — all in the app.
 - **Media types** (formats and categories) managed in the app, each with its case colour.
