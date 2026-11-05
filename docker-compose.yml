@@ -1,18 +1,26 @@
 # MediaTracker — one container, one data volume.
 # Put it behind your reverse proxy (HTTPS is required for barcode scanning and installing on a phone).
+#
+# Settings come from variables, so a Git-deployed stack (e.g. Dockhand) can set them without editing this file:
+#   MT_PORT   host port to publish (default 8080)
+#   MT_DATA   where the data lives: a volume name (default: the named volume below) or an absolute host path
+#             such as /srv/mediatracker/data (that folder must be owned by uid 1000 — see docs/MAINTENANCE.md)
+#   TZ        your time zone, e.g. America/Chicago (default UTC; used for backup file names)
 services:
   mediatracker:
     image: ghcr.io/duffduff99/mediatracker:latest
-    # To build on the server instead of pulling from GitHub, comment out `image:` and uncomment:
-    # build: .
+    pull_policy: always      # always fetch the newest published image when the stack is (re)deployed
     container_name: mediatracker
     restart: unless-stopped
     ports:
-      - "8080:8080"          # point your reverse proxy at this port
+      - "${MT_PORT:-8080}:8080"
     volumes:
-      - ./data:/data         # database + nightly backups live here — back this folder up
+      - "${MT_DATA:-mediatracker-data}:/data"   # database + nightly backups
     environment:
-      TZ: America/Chicago                  # your time zone (used for backup file names)
+      TZ: "${TZ:-UTC}"
       # MT_ADMIN_PASSWORD: change-me-now   # optional: first-start admin password (otherwise one is printed in the logs)
       # MT_BACKUP_KEEP: "14"               # nightly backups to keep
       # MT_TRASH_DAYS: "30"                # days deleted items stay in the trash
+
+volumes:
+  mediatracker-data:

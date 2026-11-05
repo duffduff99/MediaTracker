@@ -36,18 +36,25 @@ These show the real app, run against an imported collection of about 2,300 items
 
 ## Running it
 
-You need Docker, and a reverse proxy that serves it over **HTTPS** (browsers only allow the camera and "install as app" on HTTPS).
+You need Docker, plus a reverse proxy that serves the app over **HTTPS**. Browsers only allow the camera and "install as app" on HTTPS.
+
+The app listens on port **8080**. Set `MT_PORT` to publish it on a different host port.
+
+**Dockhand (deploy from Git):**
+1. Create a stack from the Git repository `https://github.com/duffduff99/MediaTracker.git`, branch `main`, compose file `docker-compose.yml`.
+2. Optionally set the stack variables `TZ`, `MT_PORT` and `MT_DATA`.
+3. Deploy.
+
+**Plain Docker:**
 
 ```bash
-mkdir mediatracker && cd mediatracker
-curl -O https://raw.githubusercontent.com/duffduff99/MediaTracker/main/docker-compose.yml
+git clone https://github.com/duffduff99/MediaTracker.git && cd MediaTracker
 docker compose up -d
-docker compose logs mediatracker | grep -A2 "First start"
 ```
 
-The last command prints the generated **admin password**. Sign in as `admin`, then change it under **Settings → My account**. Point your reverse proxy at port 8080.
+On first start, the container log prints the generated **admin password**. Sign in as `admin` and change it under **Settings → My account**.
 
-Full setup, updating, backups and troubleshooting: **[docs/MAINTENANCE.md](docs/MAINTENANCE.md)**.
+Full setup, updating, backups and troubleshooting are in **[docs/MAINTENANCE.md](docs/MAINTENANCE.md)**.
 
 ## Documentation
 
