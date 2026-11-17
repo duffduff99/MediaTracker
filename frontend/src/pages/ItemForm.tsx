@@ -44,6 +44,16 @@ export function ItemForm() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
+  const barcodeRef = useRef<HTMLInputElement>(null);
+  // On a computer (mouse/trackpad), start in the Barcode field so a USB scanner can be used straight away.
+  // Phones skip this: focusing would pop up the keyboard over the form.
+  const focusBarcode = () => {
+    if (window.matchMedia("(pointer: fine)").matches) barcodeRef.current?.focus();
+  };
+  useEffect(() => {
+    if (!editing && !params.get("barcode") && !params.get("title")) setTimeout(focusBarcode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -229,8 +239,9 @@ export function ItemForm() {
         setNotes("");
         setCustom({});
         setDupes([]);
-        titleRef.current?.focus();
         window.scrollTo({ top: 0 });
+        if (window.matchMedia("(pointer: fine)").matches) barcodeRef.current?.focus();
+        else titleRef.current?.focus();
       } else {
         navigate(`/titles/${saved.title_id}`);
       }
@@ -384,7 +395,22 @@ export function ItemForm() {
             <div className="field">
               <label htmlFor="barcode">Barcode</label>
               <div className="input-row">
-                <input id="barcode" className="input" inputMode="numeric" autoComplete="off" value={barcode} onChange={(e) => setBarcode(e.target.value)} />
+                <input
+                  id="barcode"
+                  ref={barcodeRef}
+                  className="input"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  onKeyDown={(e) => {
+                    // USB scanners type the code and press Enter: look it up instead of saving the form.
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (format && barcode.trim()) runLookup(barcode, format.id, categoryId);
+                    }
+                  }}
+                />
                 <button type="button" className="icon-btn" aria-label="Scan barcode" onClick={() => setScanning(true)}>
                   <Icon name="barcode" />
                 </button>
