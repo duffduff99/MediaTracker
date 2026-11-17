@@ -634,6 +634,13 @@ def lookup(conn: sqlite3.Connection, meta: dict, barcode: str, format_id: int, r
         for r in rows:
             if r["id"] in seen:
                 continue
+            # Common names ("Greatest Hits", "Star Trek") match lots of titles: for music the artist must
+            # match too; otherwise the years must be close (remakes are usually decades apart).
+            if category["has_artist"]:
+                if not (c.get("artist") and r["artist"] and text.search_norm(c["artist"]) == text.search_norm(r["artist"])):
+                    continue
+            elif c.get("year") and r["year"] and abs(c["year"] - r["year"]) > 3:
+                continue
             seen.add(r["id"])
             fmts = [x[0] for x in conn.execute(
                 "SELECT DISTINCT f.name FROM items i JOIN formats f ON f.id = i.format_id "

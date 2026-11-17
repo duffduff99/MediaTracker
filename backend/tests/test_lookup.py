@@ -217,3 +217,23 @@ def test_edition_combo_and_season_helpers():
     assert detect_combo("Air Force One [Blu-ray]", "4k") == []  # name doesn't mention 4K: don't guess
     assert split_season("The Walking Dead - Season 8") == ("The Walking Dead", 8)
     assert split_season("Seinfeld: The Complete Second Season") == ("Seinfeld", 2)
+
+
+def test_existing_title_suggestions_need_same_artist_or_close_year(client, meta, web):
+    cd = fmt_id(meta, "CD")
+    mine = client.post("/api/items", json={"title": "Greatest Hits", "artist": "Bruce Springsteen", "year": 1995, "format_id": cd}).json()
+    client.post("/api/items", json={"title": "Greatest Hits", "artist": "Queen", "year": 1981, "format_id": cd})
+    client.post("/api/items", json={"title": "Greatest Hits", "artist": "Fleetwood Mac", "year": 1988, "format_id": fmt_id(meta, "Cassette")})
+    web({"/ws/2/release/?": {"releases": [{"id": "r", "score": 100, "title": "Greatest Hits", "date": "1995",
+         "artist-credit": [{"name": "Bruce Springsteen"}], "media": [{"format": "CD"}]}]}})
+    r = client.get("/api/lookup", params={"barcode": "074646706022", "format_id": cd}).json()
+    assert [t["id"] for t in r["existing_titles"]] == [mine["title_id"]]
+
+    # films: same name but decades apart (remake) isn't offered
+    old = client.post("/api/items", json={"title": "Star Trek", "year": 1979, "format_id": fmt_id(meta, "Laserdisc")}).json()
+    new = client.post("/api/items", json={"title": "Star Trek", "year": 2009, "format_id": fmt_id(meta, "DVD")}).json()
+    client.put("/api/admin/integrations", json={"values": {"tmdb_api_key": "abcdef0123456789"}})
+    web({"upcitemdb": {"code": "OK", "items": [{"title": "Star Trek [Blu-ray]"}]},
+         "search/movie": {"results": [{"id": 1, "title": "Star Trek", "release_date": "2009-05-07", "popularity": 50}]}})
+    r = client.get("/api/lookup", params={"barcode": "097361312743", "format_id": fmt_id(meta, "Blu-ray")}).json()
+    assert [t["id"] for t in r["existing_titles"]] == [new["title_id"]] and old["title_id"] != new["title_id"]
